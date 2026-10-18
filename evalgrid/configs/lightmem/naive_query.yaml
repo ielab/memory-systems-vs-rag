@@ -1,0 +1,112 @@
+# ===========================================================================
+# LightMem — zjunlp/LightMem reference
+#
+# THE NATIVE-PIPELINE QUERY CONFIG. Same store, published query behaviour.
+#
+# This is default.yaml with the QUERY-SIDE keys returned to what lightmem
+# published, and every INGEST-SIDE key left byte-identical. That split is the
+# whole point of the file: the stores in outputs/_memory/ were built under
+# default.yaml and are treated as fixed, so anything read at construction time
+# must not move or the config would no longer describe the store it is pointed
+# at. `diff default.yaml naive_query.yaml` should show query keys and nothing
+# else — if it ever shows an ingest key, this file is wrong.
+#
+# Use it with --config and --native-variant, NOT --mem-variant: --mem-variant
+# suffixes outputs/_memory/ and would send the run looking for a store that was
+# never built. --native-variant suffixes only the retrieval and answer dirs.
+#
+#   python -m evalgrid.pipeline.retrieve --retriever native \
+#       --exp experiments/lightmem/longmemeval.yaml \
+#       --config evalgrid/configs/lightmem/naive_query.yaml \
+#       --native-variant naive --published-depth
+#
+#   python -m evalgrid.pipeline.answer --retriever native --prompt native \
+#       --exp experiments/lightmem/longmemeval.yaml \
+#       --config evalgrid/configs/lightmem/naive_query.yaml \
+#       --native-variant naive --from-retrieval <the dir the above wrote>
+#
+# --published-depth is REQUIRED. Without it the spec's native_top_k (270)
+# overrides the published depth below and you measure the imposed one instead.
+#
+# WHAT THIS FILE STILL DOES NOT REPRODUCE:
+#   * nothing on the query side. LightMem is the one system whose downstream
+#     was ALREADY naive: top_k 10 (= vendor retrieve(limit=10)), the embedding
+#     /qdrant retrieve strategy, and the only real published LongMemEval answer
+#     prompt in the repo (systems/lightmem/plugin.py:218 -> native_answer_prompt).
+#     So this file is byte-identical to default.yaml below the header, and it
+#     exists only so a driver can loop over all six systems with one path.
+#   * the generator and judge, which stay the harness's shared pair.
+# ===========================================================================
+
+# LightMem configuration — aligned with zjunlp/LightMem reference
+# CLI overrides injected at runtime:
+#   memory_manager.configs.model           ← --gen-model
+#   memory_manager.configs.openai_base_url ← --gen-base-url
+
+# --- Pre-compression & topic segmentation ---
+# Set model_name to a local path if you have llmlingua-2 downloaded,
+# otherwise the HuggingFace ID will be downloaded automatically.
+# Pre-compression requires tiktoken BPE files (internet access on first use).
+# On a machine without internet access, pre-cache it first:
+#   python -c "import tiktoken; tiktoken.encoding_for_model('gpt-3.5-turbo')"
+# Then uncomment below to enable.
+pre_compress: true
+pre_compressor:
+  model_name: llmlingua-2
+  configs:
+    llmlingua_config:
+      model_name: microsoft/llmlingua-2-bert-base-multilingual-cased-meetingbank
+      device_map: cuda
+      use_llmlingua2: true
+    compress_config:
+      # LongMemEval rate. The reference omits compress_config on that benchmark
+      # and so runs LLMLingua-2's 0.8 default; locomo_compress_rate below is the
+      # LoCoMo one, which the reference sets to 0.6.
+      rate: 0.8
+      target_token: -1
+      chunk_end_tokens: [".", "\n"]
+
+# Applied by LightMemPlugin.build in place of compress_config.rate when
+# --dataset locomo. Keep it in step with `rate` in any variant that sweeps
+# compression, or the variant's name describes only its LongMemEval half.
+locomo_compress_rate: 0.6
+topic_segment: true
+precomp_topic_shared: true   # matches reference: topic segmenter reuses the compressor model
+topic_segmenter:
+  model_name: llmlingua-2
+
+messages_use: user_only
+metadata_generate: true
+text_summary: true
+
+memory_manager:
+  model_name: openai       # vllm exposes an OpenAI-compatible API
+  configs:
+    api_key: token         # vllm accepts any non-empty string
+    max_tokens: 16000      # matches reference (both locomo & longmemeval)
+    
+    # greedy argmax and ignores the nucleus cutoff entirely.
+    temperature: 0
+    # model and openai_base_url injected from CLI
+
+stm_max_tokens: 1024
+update_sim_threshold: 0.8
+update_queue_top_k: 20
+update_queue_keep_top_n: 10
+update: offline
+
+index_strategy: embedding
+text_embedder:
+  model_name: huggingface
+  configs:
+    model: sentence-transformers/all-MiniLM-L6-v2
+    embedding_dims: 384
+    model_kwargs:
+      device: cuda
+
+retrieve_strategy: embedding
+embedding_retriever:
+  model_name: qdrant
+  configs:
+    embedding_model_dims: 384
+    path: qdrant_data/   # deleted+recreated on reset(); no server needed

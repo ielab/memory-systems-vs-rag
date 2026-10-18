@@ -1,0 +1,67 @@
+# ==========================================================================
+# Raw turns, BOTH speakers, on BEAM-100K — Naive RAG / full-context / oracle
+# ==========================================================================
+#
+# BEAM-100K is the folder BEAM's paper calls the 128K tier (it measures ~120 K).
+# 20 conversations, 400 questions, 2.59 M corpus tokens — about 5% of a
+# LongMemEval-S sweep.
+#
+# THREE THINGS THAT MAKE A BEAM NUMBER READ DIFFERENTLY FROM A LONGMEMEVAL ONE.
+#
+# 1. REPORT AGAINST user_turns, NOT all_turns. The corpus is 91.9% ASSISTANT
+#    tokens but 76.9% of the evidence sits in USER turns, and 6 of the 10
+#    abilities take 100% of theirs there. A user-only filter therefore discards
+#    91.9% of the corpus for a 23% evidence loss — no memory construction
+#    required. On BEAM `user_turns` is not an ablation, it is the baseline a
+#    memory system has to beat (beam.md §3).
+#
+# 2. THE SCORE IS NOT AN ACCURACY. BEAM grades against a per-question `rubric`
+#    — a third of its questions ship no gold answer string at all — so the judge
+#    scores each rubric item 1.0/0.5/0.0 and averages. metrics.json records
+#    "metric": "mean_rubric_score", and a BEAM cell must not share a table
+#    column with a LongMemEval accuracy unless the table says so.
+#    (evalgrid/benchmarks/judges/beam.py, reproducing BEAM's own judge.)
+#    --batch is NOT available for it: one question is 1-9 judge calls. The whole
+#    tier is 1,051 calls, which is cheap to run live.
+#
+# 3. GOLD IS PER QUESTION. One conversation carries 20 questions with disjoint
+#    evidence (median 2 turns each; their union is 45). Retrieval is scored at
+#    turn granularity, which BEAM uniquely supports — do NOT read its
+#    session-level recall, since a conversation has only 3-5 sessions
+#    (beam.md §2, §4).
+#
+# 4. Not a memory system: no construction stage, no plugin. The corpus is
+#    written by evalgrid.pipeline.qrels_turns, so mem_model is the literal
+#    "none" and these coordinates must match what it wrote:
+#      outputs/_qrels/all_turns/beam_100k/none/has_answer/
+#
+#   python -m evalgrid.pipeline.qrels_turns --dataset beam_100k --roles all
+#   SPEC=experiments/all_turns/beam_100k.yaml bash experiments/run_all_retrieval.sh
+#   SPEC=experiments/all_turns/beam_100k.yaml bash experiments/run_all_answers.sh
+#   SPEC=experiments/all_turns/beam_100k.yaml bash experiments/run_all_judge.sh
+
+system: all_turns
+dataset: beam_100k
+mem_model: none
+labeler_model: has_answer
+candidate_source: sweep   # keep plain "has_answer" segment (no "-retrieval" suffix)
+
+# gpt-4o-mini is this project's judge, held fixed across every system so the
+# cross-system table is comparable. On BEAM it drives judges/beam.py — BEAM's
+# own rubric prompt, verbatim — so the number is a mean rubric score.
+gen_model: Qwen/Qwen3-30B-A3B-Instruct-2507
+judge_model: gpt-4o-mini
+
+retrievers:
+  # The paper's eight retrievers (RQ2).
+  # --- sparse ---
+  - bm25
+  - sparse:naver/splade-v3
+  # --- dense ---
+  - dense:sentence-transformers/all-MiniLM-L6-v2
+  - dense:Qwen/Qwen3-Embedding-0.6B@http://localhost:8001/v1
+  - dense:Qwen/Qwen3-Embedding-4B@http://localhost:8002/v1
+  # --- fusion: BM25 + dense, reciprocal rank fusion ---
+  - rrf:sentence-transformers/all-MiniLM-L6-v2
+  - rrf:Qwen/Qwen3-Embedding-0.6B@http://localhost:8001/v1
+  - rrf:Qwen/Qwen3-Embedding-4B@http://localhost:8002/v1

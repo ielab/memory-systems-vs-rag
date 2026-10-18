@@ -1,0 +1,84 @@
+# LightMem configuration — aligned with zjunlp/LightMem reference
+# CLI overrides injected at runtime:
+#   memory_manager.configs.model           ← --gen-model
+#   memory_manager.configs.openai_base_url ← --gen-base-url
+
+# --- Pre-compression & topic segmentation ---
+# Set model_name to a local path if you have llmlingua-2 downloaded,
+# otherwise the HuggingFace ID will be downloaded automatically.
+# Pre-compression requires tiktoken BPE files (internet access on first use).
+# On a machine without internet access, pre-cache it first:
+#   python -c "import tiktoken; tiktoken.encoding_for_model('gpt-3.5-turbo')"
+# Then uncomment below to enable.
+pre_compress: true
+pre_compressor:
+  model_name: llmlingua-2
+  configs:
+    llmlingua_config:
+      model_name: microsoft/llmlingua-2-bert-base-multilingual-cased-meetingbank
+      device_map: cuda
+      use_llmlingua2: true
+    compress_config:
+      # LongMemEval rate. The reference omits compress_config on that benchmark
+      # and so runs LLMLingua-2's 0.8 default; locomo_compress_rate below is the
+      # LoCoMo one, which the reference sets to 0.6.
+      rate: 0.8
+      target_token: -1
+      chunk_end_tokens: [".", "\n"]
+
+# Applied by LightMemPlugin.build in place of compress_config.rate when
+# --dataset locomo. Keep it in step with `rate` in any variant that sweeps
+# compression, or the variant's name describes only its LongMemEval half.
+locomo_compress_rate: 0.6
+topic_segment: true
+precomp_topic_shared: true   # matches reference: topic segmenter reuses the compressor model
+topic_segmenter:
+  model_name: llmlingua-2
+
+messages_use: user_only
+metadata_generate: true
+text_summary: true
+
+memory_manager:
+  model_name: openai       # vllm exposes an OpenAI-compatible API
+  configs:
+    api_key: token         # vllm accepts any non-empty string
+    max_tokens: 16000      # matches reference (both locomo & longmemeval)
+
+    # Upstream's BaseMemoryManagerConfig defaults BOTH temperature and top_p to
+    # 0.1 (vendor/lightmem/configs/memory_manager/base_config.py:14,16). This
+    # file pins temperature to 0 and leaves top_p unset, so top_p stays at
+    # upstream's 0.1 — which is inert, because at temperature 0 vLLM does greedy
+    # argmax and ignores the nucleus cutoff entirely.
+    #
+    # Whether 0 or 0.1 is "the reference setting" is NOT established here. The
+    # 0.1 above is the library default, i.e. what you get by not passing the
+    # argument; the reference's LongMemEval eval scripts are not vendored, so
+    # there is nothing in this tree to check a deliberate 0 against. Treat this
+    # as ours until someone reads those scripts. It is ingest-side either way —
+    # lightmem prompts no model at query time (see NEEDS_MEM_LLM in
+    # scripts/query.sh) — so it does not enter a native query run.
+    temperature: 0
+    # model and openai_base_url injected from CLI
+
+stm_max_tokens: 1024
+update_sim_threshold: 0.8
+update_queue_top_k: 20
+update_queue_keep_top_n: 10
+update: offline
+
+index_strategy: embedding
+text_embedder:
+  model_name: huggingface
+  configs:
+    model: sentence-transformers/all-MiniLM-L6-v2
+    embedding_dims: 384
+    model_kwargs:
+      device: cuda
+
+retrieve_strategy: embedding
+embedding_retriever:
+  model_name: qdrant
+  configs:
+    embedding_model_dims: 384
+    path: qdrant_data/   # deleted+recreated on reset(); no server needed

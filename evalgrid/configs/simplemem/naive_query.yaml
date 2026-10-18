@@ -1,0 +1,264 @@
+# ===========================================================================
+# SimpleMem — arXiv 2601.02553 / aiming-lab/SimpleMem
+#
+# THE NATIVE-PIPELINE QUERY CONFIG. Same store, published query behaviour.
+#
+# This is default.yaml with the QUERY-SIDE keys returned to what simplemem
+# published, and every INGEST-SIDE key left byte-identical. That split is the
+# whole point of the file: the stores in outputs/_memory/ were built under
+# default.yaml and are treated as fixed, so anything read at construction time
+# must not move or the config would no longer describe the store it is pointed
+# at. `diff default.yaml naive_query.yaml` should show query keys and nothing
+# else — if it ever shows an ingest key, this file is wrong.
+#
+# Use it with --config and --native-variant, NOT --mem-variant: --mem-variant
+# suffixes outputs/_memory/ and would send the run looking for a store that was
+# never built. --native-variant suffixes only the retrieval and answer dirs.
+#
+#   python -m evalgrid.pipeline.retrieve --retriever native \
+#       --exp experiments/simplemem/longmemeval.yaml \
+#       --config evalgrid/configs/simplemem/naive_query.yaml \
+#       --native-variant naive --published-depth
+#
+#   python -m evalgrid.pipeline.answer --retriever native --prompt native \
+#       --exp experiments/simplemem/longmemeval.yaml \
+#       --config evalgrid/configs/simplemem/naive_query.yaml \
+#       --native-variant naive --from-retrieval <the dir the above wrote>
+#
+# --published-depth is REQUIRED. Without it the spec's native_top_k (45)
+# overrides the published depth below and you measure the imposed one instead.
+#
+# WHAT THIS FILE STILL DOES NOT REPRODUCE:
+#   * the paper's adaptive retrieval depth in [3, 20], gated by a query-
+#     complexity estimator (Table 7). No such code exists in the release, so
+#     the fixed depths below are the code's behaviour and the paper's is
+#     unreachable from either config or vendored source.
+#   * the answer prompt. --prompt native returns the SHARED prompt; upstream's
+#     verbatim one is LoCoMo-shaped (systems/simplemem/locomo.py).
+#   * the generator and judge, which stay the harness's shared pair.
+#   * answer_max_tokens: 2000 is ours; no published value exists to restore.
+# ===========================================================================
+
+# SimpleMem configuration — aligned with aiming-lab/SimpleMem (vendor/simplemem)
+# and the paper (arXiv 2601.02553), with the deviations marked DEVIATION below.
+#
+# THE ONLY SimpleMem config. It used to be three (default/native-window/
+# paper-window, one per windowing), which made "SimpleMem" a name for three
+# systems and every number ambiguous unless the variant was quoted with it.
+# This file is the PAPER's setting; §"Windowing" below records what the other
+# two were and what it costs to have dropped them.
+#
+# CLI overrides injected at runtime (SimpleMemPlugin.apply_mem_model):
+#   memory_llm.model    ← --mem-model
+#   memory_llm.base_url ← --mem-base-url
+#
+# The memory LLM is served OpenAI-compatible by vLLM, same endpoint as stage 1:
+#   vllm serve Qwen/Qwen3-30B-A3B-Instruct-2507 --port 8000 ...
+#   python -m evalgrid.pipeline.ingest --system simplemem --dataset longmemeval_s \
+#       --mem-model Qwen/Qwen3-30B-A3B-Instruct-2507 \
+#       --mem-base-url http://localhost:8000/v1
+#
+# Note this model is needed at ANSWER time too, and there it is expensive:
+# SimpleMem's native retrieval spends 5-8 LLM calls per question on planning,
+# query analysis and reflection. Ingest is the cheap half (one call per window).
+
+memory_llm:
+  api_key: token          # vllm accepts any non-empty string
+  # Output budget per memory call. Upstream sends none, and this was null for
+  # the same reason its docstring still gives: a cap that truncates the
+  # extraction call's JSON array turns into a parse failure, three retries, and
+  # a silently dropped window (SimpleMemBase.empty_windows).
+  #
+  # DEVIATION: that reasoning assumed null means "no cap". It does not. With no
+  # max_tokens the CONTEXT WINDOW becomes the cap, so the truncation it was
+  # meant to avoid happens anyway — just at the most expensive possible place.
+  # Observed in outputs/_smoke4 (sample 118b2229, 32768-token window): four
+  # extraction calls stopped at exactly 32768 total tokens, mid-JSON-string.
+  # One recovered on retry; the other was re-sent twice more and came back
+  # byte-identical each time (in=6002, out=26766, ~197s a call), so that window
+  # cost ~80k output tokens and ~10 minutes before being dropped. See
+  # our development notes for why the replies run away in the first place — it is a
+  # repetition loop, upstream's prompt against this model, and NOT fixed here.
+  #
+  # 16000 does not fix the drop. It bounds the blast radius: the largest
+  # non-runaway completion in that run was 11,868 tokens, so this clears every
+  # legitimate extraction by ~35% while capping a runaway at 16k instead of
+  # ~26.7k. It also puts the cap somewhere diagnosable — finish_reason
+  # "length" against a configured budget is a signal, against the context wall
+  # it is an accident — and keeps prompt+completion inside CTX_SHORT with room
+  # (largest prompt seen: 10,046). The window is fixed-size (20 dialogues,
+  # overlap 5), so unlike a_mem's this prompt does not grow with the store.
+  #
+  # Set back to null to reproduce upstream verbatim. Watch meta.json's
+  # truncated_calls: if it rises, read the completion before raising this —
+  # every truncation observed so far was a loop, and a bigger budget buys a
+  # longer loop rather than a complete reply.
+  # NAIVE: upstream sends no max_tokens. Ingest is out of scope for this file,
+  # so this now caps only the query-side calls (planning, adequacy checks,
+  # reflection rewrites), which are short — the runaway extraction loop in
+  # that was an ingest-path problem. If a query-side call does run
+  # away, put 16000 back and label it; do not raise it.
+  max_tokens: null
+  # NAIVE: upstream holds this inline at each call site — 0.1 for the adequacy
+  #   checks, 0.2-0.3 for query planning and the reflection rewrites. Deleting
+  #   this key restores those; Table 7 specifies 0.0 for stage 1 (extraction,
+  #   ingest-side) only and says nothing about the query-side calls.
+  #
+  #   THE E2 DEVIATION, and the only one on this file's query side. Upstream's
+  #   value is 0.2-0.3, per call site, and that is what a faithful "as published" row would send.
+  #   It is pinned to 0 here because of a constraint the paper never faced: this
+  #   row is run ONCE, and no seed reaches this client (the generator takes
+  #   gen_seed; a_mem's and simplemem's memory-LLM controllers take none). One
+  #   unseeded draw at 0.2-0.3, per call site is a single sample from a distribution nobody has
+  #   characterised — rerun it and the number moves, by an unknown amount. A
+  #   labelled deviation you can state beats a random draw you cannot.
+  #
+  #   Note what 0 does NOT buy: exact reproducibility. vLLM's kernels still vary
+  #   with batch size and shard count (see configs/mem0/default.yaml). It buys
+  #   greedy decoding, which shrinks the variance by a lot rather than to zero.
+  #
+  #   Set 0.2-0.3, per call site to run it as published, and then run it at least 3 times and
+  #   report the spread — HyperMem's own paper averages its judge over 3.
+  temperature: 0
+  # response_format={"type": "json_object"} handling, when use_json_format is on:
+  # "auto" tries it and falls back to plain prompting if the server rejects it,
+  # "on" requires it, "off" never sends it.
+  json_mode: auto
+  # model and base_url injected from CLI
+
+# Paper Appendix B.2 Table 7: "Qwen3-embedding-0.6b (1024 dimensions)" — which
+# is also the released code's default (core/config_default.py:31). Only affects
+# SimpleMem's NATIVE retrieval; the pipeline's retrieve stage ranks the flat
+# corpus with its own embedder.
+embedder:
+  model: Qwen/Qwen3-Embedding-0.6B
+
+# --- Ingest -----------------------------------------------------------------
+
+# Windowing. THE PAPER'S, and the reason this file exists rather than three.
+#
+# Three settings were in play and no two agree — the disagreement is upstream's,
+# not ours:
+#
+#   paper       W=20, stride 5. Appendix B.2 Table 7: "Window Size (W) 20 turns
+#               / Sliding Stride 5 turns (25% overlap)". THIS FILE.
+#   code        W=40, overlap 2 — core/config_default.py:60-63, commented
+#               "for locomo". Was native-window.yaml. Also the LoCoMo-faithful
+#               setting, since LoCoMo is one conversation across ~20 sessions
+#               and upstream never flushes at a session boundary.
+#   session     flush at every session boundary so an extraction call never
+#               spans two sessions. Ours, not upstream's. Was this file's own
+#               default until the consolidation.
+#
+# NOTE a third source disagrees with both: upstream simplemem/integrations/config/
+# settings.py:105 (not vendored here) declares window_size = 20. It is not the module the core
+# imports (memory_builder reads core/config_default.py), so it is dead as far as
+# a run is concerned — but it is why "settings.py" is the wrong file to cite for
+# the code's defaults, which an earlier version of this comment did.
+#
+# WHAT DROPPING `session` COSTS, stated plainly, because it was the default and
+# our development notes call it the main quality knob: a 20-turn
+# window covers roughly two LongMemEval-S sessions, so an extraction call mixes
+# unrelated conversations, and provenance here is window-level — every entry
+# inherits has_answer from its whole window, now smeared across those sessions.
+# qrels_has_answer is correspondingly coarser than LightMem's source_id or
+# A-Mem's per-note provenance; use the LLM labeler for cross-system recall.
+# Ingest is ~25 extraction calls per sample against session's ~50.
+ingest_policy: window
+window_size: 20
+
+# The paper's own inconsistency, and the one judgment call in this file.
+#
+# Table 7 says "Sliding Stride 5 turns" and calls it "25% overlap". W=20 with a
+# stride of 5 shares 15 turns between consecutive windows — 75% overlap, not
+# 25%. The two readings cannot both hold:
+#
+#   overlap_size: 5   step = 20 - 5 = 15. Stride 15, overlap 5 (25% of the
+#                     window). Follows the parenthetical. THIS FILE.
+#   overlap_size: 15  step = 5. Stride 5, overlap 15. Follows the literal
+#                     "Sliding Stride 5 turns", and triples the extraction
+#                     calls (every turn is extracted ~4 times).
+#
+# Taking the parenthetical because the released code was never the paper's code
+# — there is nothing to check either reading against (our development notes
+# simplemem.md §2) — and because it keeps the call count within a factor of the
+# code's own setting. _drain advances by max(1, window_size - overlap_size), so
+# overlap_size IS the overlap here.
+overlap_size: 5
+
+# Which speakers reach the extractor (LongMemEval only; LoCoMo always ingests
+# both). `all` is what SimpleMem's own LongMemEval numbers require: its paper
+# (Table 2) reports SS-Assistant 75.00 / 76.79, and 51 of those 56 questions
+# have evidence ONLY in assistant turns, so that column is unattainable under
+# user_only. Set `user_only` only as a labelled ablation.
+roles: all
+
+# response_format={"type": "json_object"} on every memory call.
+#
+# DEVIATION FROM THE PAPER, which Table 7 gives as "Output Constraint: Strict
+# JSON schema enforced". Left OFF, which is upstream's default
+# (core/config_default.py:52), because the two cannot both be had here: the
+# extraction prompt asks for a JSON *array* and json_object mode constrains the
+# top level to an object on both OpenAI and vLLM — which `_parse_llm_response`
+# rejects ("Expected JSON array"), retries three times, and then drops the
+# window. Enforcing the paper's constraint properly needs a json_schema
+# response_format carrying the array schema, which upstream never sends and
+# which is a vendored-call-site edit (see vendor/VERSIONS.md).
+#
+# Until then this is the one Table 7 row this config does not meet. Watch
+# json_failures and empty_windows in the store's meta.json.
+use_json_format: false
+
+# LanceDB lives here; each process gets its own subdirectory (<db_path>/<pid>)
+# because reset() drops and recreates the table per sample. Relative to CWD, as
+# LightMem's qdrant_data is.
+db_path: lancedb_data
+table_name: memory_entries
+
+# Upstream prints a line per window and ~10 per question.
+silence_upstream_stdout: true
+
+# --- Native retrieval -------------------------------------------------------
+# Only used by SimpleMem's OWN query path (benchmarks.runner phase="answer").
+# The staged pipeline's retrieve stage ignores all of it and ranks the flat
+# corpus with its own retriever and top-k.
+retrieval:
+  # core/config_default.py:71-77. Note the paper describes an adaptive depth in
+  # [3, 20] gated by a query-complexity estimator (Table 7, "Retrieval Range");
+  # no such code exists in the release — `grep -rn "k_min\|k_max\|adaptive"
+  # vendor/simplemem/core/` is empty — so
+  # these fixed values are the code's behaviour, not the paper's.
+  semantic_top_k: 25      # per sub-query, and there can be up to 4 of them
+  keyword_top_k: 5
+  structured_top_k: 5
+  enable_planning: true
+  enable_reflection: true
+  max_reflection_rounds: 2
+  # Upstream defaults these on with 8 workers (core/config_default.py:101-102).
+  # Off here: the sub-queries of one question would open 8 concurrent
+  # connections to the vLLM endpoint while N answer shards are already running,
+  # and the union order (hence the answer context order) becomes
+  # nondeterministic. The worker count is inert while the switch is off; it sits
+  # at HybridRetriever's own signature default rather than config_default's 8.
+  # NAIVE, DELIBERATELY NOT UPSTREAM'S. core/config_default.py:101-102 ships
+  #   these on with 8 workers, but the PAPER specifies no parallelism parameter
+  #   at all — it is an infrastructure default, not a published setting. It is
+  #   also not inert: the tri-path union completes out of order, so the answer
+  #   context order (hence the answer) varies run to run, and one question's
+  #   sub-queries would open 8 concurrent connections to vLLM while N answer
+  #   shards are already running. Aligning with the paper means not importing a
+  #   code default that costs reproducibility and buys nothing the paper asked
+  #   for. Set true/8 only as a labelled throughput experiment.
+  enable_parallel_retrieval: false
+  max_retrieval_workers: 3
+
+# The answer prompt. "shared" (the default, and what every run currently in
+# outputs/ used) or "native":
+#   upstream's AnswerGenerator prompt, delegated to rather than copied.
+#   The JSON reply is unwrapped to its `answer` field, as upstream does.
+#   NOT the evolver/benchmarks/longmemeval.py one — that switches on the
+#   GOLD question_type and would leak the category into the prompt.
+answer_prompt: native
+
+# Output budget for the final answer, from our generator.
+answer_max_tokens: 2000

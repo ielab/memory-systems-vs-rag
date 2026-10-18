@@ -1,0 +1,195 @@
+# ===========================================================================
+# A-Mem — arXiv 2502.12110 / WujiangXu/A-mem @ 0c8039f
+#
+# THE NATIVE-PIPELINE QUERY CONFIG. Same store, published query behaviour.
+#
+# This is default.yaml with the QUERY-SIDE keys returned to what a_mem
+# published, and every INGEST-SIDE key left byte-identical. That split is the
+# whole point of the file: the stores in outputs/_memory/ were built under
+# default.yaml and are treated as fixed, so anything read at construction time
+# must not move or the config would no longer describe the store it is pointed
+# at. `diff default.yaml naive_query.yaml` should show query keys and nothing
+# else — if it ever shows an ingest key, this file is wrong.
+#
+# Use it with --config and --native-variant, NOT --mem-variant: --mem-variant
+# suffixes outputs/_memory/ and would send the run looking for a store that was
+# never built. --native-variant suffixes only the retrieval and answer dirs.
+#
+#   python -m evalgrid.pipeline.retrieve --retriever native \
+#       --exp experiments/a_mem/longmemeval.yaml \
+#       --config evalgrid/configs/a_mem/naive_query.yaml \
+#       --native-variant naive --published-depth
+#
+#   python -m evalgrid.pipeline.answer --retriever native --prompt native \
+#       --exp experiments/a_mem/longmemeval.yaml \
+#       --config evalgrid/configs/a_mem/naive_query.yaml \
+#       --native-variant naive --from-retrieval <the dir the above wrote>
+#
+# --published-depth is REQUIRED. Without it the spec's native_top_k (25)
+# overrides the published depth below and you measure the imposed one instead.
+#
+# WHAT THIS FILE STILL DOES NOT REPRODUCE:
+#   * the answer prompt. --prompt native returns the SHARED prompt: A-Mem's
+#     verbatim prompts are per-LoCoMo-category (systems/a_mem/locomo.py) and
+#     there is no published LongMemEval prompt to port.
+#   * the generator and judge, which stay the harness's shared pair.
+#   * answer_max_tokens: 2000 is ours; no published value exists to restore.
+# ===========================================================================
+
+# A-Mem configuration — aligned with WujiangXu/A-mem @ 0c8039f and the paper
+# (arXiv 2502.12110).
+#
+# CLI overrides injected at runtime (AMemPlugin.apply_mem_model):
+#   memory_llm.model    ← --mem-model
+#   memory_llm.base_url ← --mem-base-url
+#
+# The memory LLM is served OpenAI-compatible by vLLM, same endpoint as stage 1:
+#   vllm serve Qwen/Qwen3-30B-A3B-Instruct-2507 --port 8000 ...
+#   python -m evalgrid.pipeline.ingest --system a_mem --dataset locomo \
+#       --mem-model Qwen/Qwen3-30B-A3B-Instruct-2507 \
+#       --mem-base-url http://localhost:8000/v1
+#
+# Note this model is needed at ANSWER time too, not only ingest: A-Mem generates
+# query keywords with the memory model before every retrieval.
+
+memory_llm:
+  api_key: token          # vllm accepts any non-empty string
+  # DEVIATION: upstream pins 1000 on every memory call. At 1000 the first smoke
+  # run stopped 5/38 calls at exactly the cap, all of them memory-evolution
+  # responses cut mid-JSON — and upstream json-parses that reply in a
+  # try/except, so a clipped evolution is silently no evolution.
+  #
+  # That note also predicted why 2000 would not hold either: the evolution
+  # prompt carries the note's k nearest neighbours, so the reply grows with the
+  # store, and a rate measured at note 19 is a floor. It was. A full 550-note
+  # sample (outputs/_trace_smoke, 2026-08-14) stopped 40/550 calls at exactly
+  # 2000 — 7% of every evolution decision in the sample, silently dropped, and
+  # the 550th note is still only a tenth of what a LongMemEval-S sample builds
+  # at the top of the range.
+  #
+  # 4000 clears the observed p99 (1820 output tokens at p90) with the same
+  # multiple of headroom 2000 was chosen to give over its own p90. Watch
+  # meta.json's truncated_calls: if it is nonzero again at 4000, the right move
+  # is to look at what the evolution prompt has grown into, not to keep
+  # doubling.
+  # NAIVE: upstream's pin. Not binding on the query-time keyword prompt; it was
+  #   the ingest-time evolution replies that ran into it.
+  max_tokens: 1000
+  # DEVIATION: upstream's default is 0.7 — the signature default of
+  # get_completion on every one of its backends (memory_layer.py:43,88,137,209),
+  # and neither of its two memory call sites (:339, :758) overrides it.
+  #
+  # Pinned to 0 so the memory stage is greedy. A-Mem samples harder than
+  # anything else here: 2-4 calls per turn, and the evolution call's output
+  # decides which links a note draws, which changes the k neighbours the NEXT
+  # evolution sees. At 0.7 that compounds — two ingests of the same sample give
+  # two different memory graphs, and no retriever config can be compared across
+  # them. Nothing published turns on the variance; nothing here can survive it.
+  #
+  # Set back to 0.7 to reproduce upstream verbatim.
+  # NAIVE: upstream's get_completion default on every backend (memory_layer.py:
+  #   43,88,137,209) is 0.7 — the signature default, which neither memory call
+  #   site overrides. At query time this is the keyword-generation call.
+  #
+  #   THE E2 DEVIATION, and the only one on this file's query side. Upstream's
+  #   value is 0.7, and that is what a faithful "as published" row would send.
+  #   It is pinned to 0 here because of a constraint the paper never faced: this
+  #   row is run ONCE, and no seed reaches this client (the generator takes
+  #   gen_seed; a_mem's and simplemem's memory-LLM controllers take none). One
+  #   unseeded draw at 0.7 is a single sample from a distribution nobody has
+  #   characterised — rerun it and the number moves, by an unknown amount. A
+  #   labelled deviation you can state beats a random draw you cannot.
+  #
+  #   Note what 0 does NOT buy: exact reproducibility. vLLM's kernels still vary
+  #   with batch size and shard count (see configs/mem0/default.yaml). It buys
+  #   greedy decoding, which shrinks the variance by a lot rather than to zero.
+  #
+  #   Set 0.7 to run it as published, and then run it at least 3 times and
+  #   report the spread — HyperMem's own paper averages its judge over 3.
+  temperature: 0
+  # json_schema structured output: "auto" tries it and falls back to plain JSON
+  # prompting if the server rejects it, "on" requires it, "off" never sends it.
+  # vLLM supports it via guided decoding; auto costs nothing when it works.
+  structured_output: auto
+  # model and base_url injected from CLI
+
+# Paper §4.2: "For text embedding, we implement the all-minilm-l6-v2 model
+# across all experiments." Same encoder as the LightMem config, so the two
+# systems' native retrieval is embedder-matched.
+embedder:
+  model: sentence-transformers/all-MiniLM-L6-v2
+
+# Top-k neighbours considered for link generation and evolution (paper Eq. 5,
+# M_near). It reaches the vendored code through an instance-level rebind of
+# find_related_memories (ADAPTER note in evalgrid/systems/a_mem/system.py);
+# before 2026-08-12 this key was read into an attribute nobody used, so any run
+# that set it to something other than 5 in fact ran at 5.
+#
+# DISTINCT FROM `retrieve_k` BELOW (Eq. 10), and not a deviation. The paper
+# writes both as a bare `k`, which is why this comment once called `link_k: 10`
+# "the paper-faithful setting" — an over-reading of the notation, corrected
+# here. Every value the paper gives for `k` is scoped to RETRIEVAL:
+#   * §4.2: "In our memory retrieval process, we primarily employ k=10 ... while
+#     adjusting this parameter for specific categories";
+#   * Appendix A.5 Table 8 is captioned "Selection of k values in retriever"
+#     (10 for the Qwen/Llama rows, 40-50 for the GPT ones);
+#   * run_k_sweep.sh sweeps K_VALUES=(10 15 ... 50) and passes each as
+#     `--retrieve_k` (run_k_sweep.sh:12,75) — exactly that range. Its header says
+#     "Memories are already built — this only re-runs the QA answering step",
+#     and link_k is write-time (memory_layer.py:755), so all nine sweep points
+#     ran with Eq. 5's k at its inline 5.
+# The paper therefore states NO value for this parameter; 5 is the code's value
+# and the one behind every published A-Mem number. Setting 10 here is
+# a genuine departure, not a restoration: it doubles the fan-out (measured 4.3
+# units/k, 2,032 tok/k at 5), pushing a question's context toward ~40k tokens,
+# and makes the most expensive ingest in this repo roughly twice as expensive
+# again (all k neighbour notes are rendered in full into every evolution
+# prompt).
+link_k: 5
+
+# Which speakers become notes (LongMemEval only; LoCoMo always ingests both).
+# `all` ports A-Mem's LoCoMo policy across unchanged — upstream's evaluate_dataset
+# loops every turn of every session regardless of speaker. It is also what
+# A-Mem's published results need: LightMem's paper (Table 7) scores A-MEM 96.43
+# on the 56 single-session-assistant questions, unreachable if assistant turns
+# never enter the store. Set `user_only` only as a labelled ablation.
+#
+# COST WARNING: A-Mem spends 2-4 LLM calls per NOTE, so `all` roughly doubles
+# the most expensive ingest in this repo (~1k-2k calls/sample becomes ~2k-4k).
+roles: all
+
+# Top-k for query-time retrieval (paper Eq. 10) — the one k the paper does put a
+# number on, and not the same parameter as `link_k` above. §4.2 uses k=10 "while
+# adjusting this parameter for specific categories"; Appendix A.5 Table 8 lists
+# those per-category values, up to 50 for the GPT models. This is a single global
+# k, as upstream's driver applies it — its per-category branch is commented out
+# (test_advanced.py:130-133), leaving `k=self.retrieve_k` for every category.
+# Only affects A-Mem's NATIVE retrieval path; the pipeline's own retrieve stage
+# ranks the flat corpus with its own top-k.
+retrieve_k: 10
+
+# Every N evolutions, upstream rebuilds the whole index. Left at upstream's
+# default. Be aware it rebuilds with a DIFFERENT document format than add_note
+# uses, so on a long sample the index representation changes partway through
+# ingest; raise it above the note count to keep one format throughout.
+evo_threshold: 100
+
+# The answer prompt. "shared" (the default, and what every run currently in
+# outputs/ used) or "native":
+#   A-Mem's DEFAULT LoCoMo branch, ported. NOT a published LongMemEval
+#   prompt — none exists; upstream asserts a LoCoMo category. Label any
+#   number from this row accordingly. See the adapter's module docstring.
+answer_prompt: native
+
+# Output budget for the final answer, from our generator.
+answer_max_tokens: 2000
+
+# Bind `re` into vendor/a_mem/memory_layer.py, which calls re.sub at line 380
+# without importing it. Without this, note construction silently returns empty
+# keywords/tags and context "General" for EVERY note, and A-Mem degenerates to
+# embedding raw content — with no error raised anywhere. Set false only to
+# reproduce that behaviour on purpose. See evalgrid/systems/a_mem/system.py.
+patch_missing_re: true
+
+# Upstream prints every prompt and every response to stdout, per note.
+silence_upstream_stdout: true

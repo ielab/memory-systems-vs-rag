@@ -1,0 +1,69 @@
+# Raw turns on LongMemEval-S grouped into (user, assistant) EXCHANGES — the
+# document-granularity control for the naive-RAG baseline.
+#
+# Same turns as experiments/all_turns/longmemeval.yaml, different document
+# boundary: there one utterance is one retrievable doc, here one exchange is.
+# This is the shape the pair-at-a-time systems construct memory over — lightmem's
+# LongMemEval driver calls add_memory once per pair, memorybank stores one
+# {query, response} record per pair, mem0's conversational ingest is per
+# turn-pair — so this row separates "the memory system helped" from "the unit
+# was an exchange". Pairing is literally memorybank.store.pair_turns, the same
+# call that system's ingest makes.
+#
+# READ BEFORE PUTTING THIS IN A TABLE WITH all_turns. Two representation
+# effects, neither a bug:
+#   * a pair is relevant if EITHER side is, so the gold set collapses wherever
+#     both sides of one exchange carry evidence. Recall@k denominators are not
+#     the same as all_turns' — do not stack the columns without a note.
+#   * a pair doc is ~2x the text of a turn doc, so top-10 pairs is ~top-20 turns
+#     of context. Compare at matched k or at matched context tokens
+#     (`context_items` is recorded on every answer record) and say which.
+# The full-context row is NOT rerun here: --retriever full feeds the whole
+# corpus in chronological order, which is the same string as all_turns' up to a
+# newline. Use experiments/all_turns for full context.
+#
+# Not a memory system: there is no construction stage and no plugin. The corpus
+# is written by evalgrid.pipeline.qrels_turns, so these coordinates MUST match
+# what it wrote:
+#   outputs/_qrels/pair_turns/<dataset>/none/has_answer/
+# mem_model is the literal string "none" for that reason, and
+# candidate_source=sweep keeps the labeler segment as plain "has_answer"
+# ("retrieval" would append "-retrieval" and point at a tree never built here).
+#
+#   python -m evalgrid.pipeline.qrels_turns --dataset longmemeval_s --roles pair
+#   SPEC=experiments/pair_turns/longmemeval.yaml bash experiments/run_all_retrieval.sh
+#   SPEC=experiments/pair_turns/longmemeval.yaml bash experiments/run_all_answers.sh
+#   SPEC=experiments/pair_turns/longmemeval.yaml bash experiments/run_all_judge.sh
+#
+# Note there is no ingest line above — that is the whole point of this spec.
+# Zero construction cost is the baseline every memory system is charged against.
+
+system: pair_turns
+dataset: longmemeval_s
+mem_model: none
+labeler_model: has_answer
+candidate_source: sweep
+
+# Answer/judge models. gpt-4o-mini is this project's judge, held fixed across
+# every system so the cross-system table is comparable. Override per-run with
+# GEN_MODEL=... / JUDGE_MODEL=... (JUDGE_MODEL=gpt-5.5 is LightMem's primary
+# judge — metrics files coexist per judge).
+gen_model: Qwen/Qwen3-30B-A3B-Instruct-2507
+judge_model: gpt-4o-mini
+
+# The same 11 retrievers as the all_turns spec, so the granularity comparison is
+# matched retriever for matched retriever. See
+# experiments/lightmem/longmemeval.yaml for the entry format.
+retrievers:
+  # The paper's eight retrievers (RQ2).
+  # --- sparse ---
+  - bm25
+  - sparse:naver/splade-v3
+  # --- dense ---
+  - dense:sentence-transformers/all-MiniLM-L6-v2
+  - dense:Qwen/Qwen3-Embedding-0.6B@http://localhost:8001/v1
+  - dense:Qwen/Qwen3-Embedding-4B@http://localhost:8002/v1
+  # --- fusion: BM25 + dense, reciprocal rank fusion ---
+  - rrf:sentence-transformers/all-MiniLM-L6-v2
+  - rrf:Qwen/Qwen3-Embedding-0.6B@http://localhost:8001/v1
+  - rrf:Qwen/Qwen3-Embedding-4B@http://localhost:8002/v1

@@ -1,0 +1,133 @@
+# ==========================================================================
+# Mem0 on BEAM-100K, default config
+# ==========================================================================
+#
+# BEAM-100K is the folder BEAM's paper calls the 128K tier (it measures ~120 K).
+# 20 conversations, 400 questions, 2.59 M corpus tokens — about 5% of a
+# LongMemEval-S sweep.
+#
+# THREE THINGS THAT MAKE A BEAM NUMBER READ DIFFERENTLY FROM A LONGMEMEVAL ONE.
+#
+# 1. REPORT AGAINST user_turns, NOT all_turns. The corpus is 91.9% ASSISTANT
+#    tokens but 76.9% of the evidence sits in USER turns, and 6 of the 10
+#    abilities take 100% of theirs there. A user-only filter therefore discards
+#    91.9% of the corpus for a 23% evidence loss — no memory construction
+#    required. On BEAM `user_turns` is not an ablation, it is the baseline a
+#    memory system has to beat (beam.md §3).
+#
+# 2. THE SCORE IS NOT AN ACCURACY. BEAM grades against a per-question `rubric`
+#    — a third of its questions ship no gold answer string at all — so the judge
+#    scores each rubric item 1.0/0.5/0.0 and averages. metrics.json records
+#    "metric": "mean_rubric_score", and a BEAM cell must not share a table
+#    column with a LongMemEval accuracy unless the table says so.
+#    (evalgrid/benchmarks/judges/beam.py, reproducing BEAM's own judge.)
+#    --batch is NOT available for it: one question is 1-9 judge calls. The whole
+#    tier is 1,051 calls, which is cheap to run live.
+#
+# 3. GOLD IS PER QUESTION. One conversation carries 20 questions with disjoint
+#    evidence (median 2 turns each; their union is 45). Retrieval is scored at
+#    turn granularity, which BEAM uniquely supports — do NOT read its
+#    session-level recall, since a conversation has only 3-5 sessions
+#    (beam.md §2, §4).
+#
+# 4. SESSION SIZE. A BEAM-100K session is a median ~25 K tokens against
+#    LongMemEval's ~1 K, and 25 of the 90 exceed the 32,768-token window
+#    lightmem and simplemem are configured at — those two will run their own
+#    chunker on some sessions. Ingest policy is otherwise inherited from each
+#    system's LongMemEval driver, which is measured-safe here: every BEAM
+#    session has an even message count, starts with a user turn and alternates
+#    strictly, so nothing is dropped and no parity is flipped
+#    (evalgrid/systems/<system>/beam.py).
+#
+#   python -m evalgrid.pipeline.ingest           --exp experiments/mem0/beam_100k.yaml --mem-base-url http://localhost:8000/v1
+#   python -m evalgrid.pipeline.qrels_has_answer --exp experiments/mem0/beam_100k.yaml
+#   SPEC=experiments/mem0/beam_100k.yaml bash experiments/run_all_retrieval.sh
+#   SPEC=experiments/mem0/beam_100k.yaml bash experiments/run_all_answers.sh
+#   SPEC=experiments/mem0/beam_100k.yaml bash experiments/run_all_judge.sh
+
+system: mem0
+dataset: beam_100k
+mem_model: Qwen/Qwen3-30B-A3B-Instruct-2507
+labeler_model: has_answer
+candidate_source: sweep   # keep plain "has_answer" segment (no "-retrieval" suffix)
+
+# gpt-4o-mini is this project's judge, held fixed across every system so the
+# cross-system table is comparable. On BEAM it drives judges/beam.py — BEAM's
+# own rubric prompt, verbatim — so the number is a mean rubric score.
+gen_model: Qwen/Qwen3-30B-A3B-Instruct-2507
+judge_model: gpt-4o-mini
+
+retrievers:
+  # --- sparse ---
+  - bm25
+  - sparse:naver/splade-v3
+  # --- dense ---
+  - dense:sentence-transformers/all-MiniLM-L6-v2          # the encoder configs/mem0/default.yaml sets
+  - dense:Qwen/Qwen3-Embedding-0.6B@http://localhost:8001/v1
+  - dense:Qwen/Qwen3-Embedding-4B@http://localhost:8002/v1
+  # --- fusion: BM25 + dense, reciprocal rank fusion (rrf_k=60) ---
+  - rrf:sentence-transformers/all-MiniLM-L6-v2
+  - rrf:Qwen/Qwen3-Embedding-0.6B@http://localhost:8001/v1
+  - rrf:Qwen/Qwen3-Embedding-4B@http://localhost:8002/v1
+
+# The same eight, inside Mem0's own query loop.
+native_retrievers:
+  # --- sparse ---
+  - bm25
+  - sparse:naver/splade-v3
+  # --- dense ---
+  - dense:sentence-transformers/all-MiniLM-L6-v2          # the encoder configs/mem0/default.yaml sets
+  - dense:Qwen/Qwen3-Embedding-0.6B@http://localhost:8001/v1
+  - dense:Qwen/Qwen3-Embedding-4B@http://localhost:8002/v1
+  # --- fusion: BM25 + dense, reciprocal rank fusion (rrf_k=60) ---
+  - rrf:sentence-transformers/all-MiniLM-L6-v2
+  - rrf:Qwen/Qwen3-Embedding-0.6B@http://localhost:8001/v1
+  - rrf:Qwen/Qwen3-Embedding-4B@http://localhost:8002/v1
+
+# --- Native path: the imposed retrieval depth -------------------------------
+# Read ONLY by the two stages that run Mem0's own loop
+# (pipeline/retrieve._run_native and pipeline/answer._run_native, live runs).
+# The flat sweep and the shared-prompt answer path ignore it — their depth is
+# the `--top-k` axis every system is compared on, default 10.
+#
+#   python -m evalgrid.pipeline.retrieve --retriever native \
+#       --exp experiments/mem0/longmemeval.yaml
+#   python -m evalgrid.pipeline.answer --retriever native --prompt native \
+#       --exp experiments/mem0/longmemeval.yaml \
+#       --from-retrieval <the dir above> --top-k 5    # or --context-budget 500
+#
+# WHY IT IS NOT SPELLED `top_k`. --top-k means two different things. On the
+# native path it is RETRIEVAL depth — retriever identity, pushed into the
+# system's own retriever before it runs, and keyed into the run directory as a
+# `-top330` segment (lib/paths.native_segment), so this condition can never
+# overwrite the published-depth control. On the shared path it is PROMPT depth,
+# the axis every system is compared on. One spec drives both halves of a sweep,
+# so the two cannot share a key: a `top_k: 330` here would silently move the
+# shared comparison from top10 to top330.
+#
+# NOT APPLIED ON A REPLAY (--from-retrieval). There --top-k is a cut over units
+# already retrieved — an answer-side axis that gets swept — so it comes from the
+# CLI or not at all.
+#
+# `--published-depth` OPTS OUT, and that is how the published-depth control runs
+# off this same spec: it retrieves at the depth in the system's own config and
+# its directory carries no `-top<k>`. scripts/query.sh passes it
+# whenever NATIVE_TOP_K is empty.
+#
+# The depth belongs in this spec rather than in evalgrid/configs/mem0/default.yaml
+# because a knob set there changes the ranking while leaving the run in the same
+# directory as the setting before it.
+#
+# 330: 1.0 units/k and 24 tokens/k, measured from outputs/_smoke2_retrieval on
+# 2026-08-15 — ~2x headroom on both answer axes (top-50 memories, a 4000-token
+# budget), with tokens the binding one for Mem0. Its facts are the smallest
+# units in the grid, which is why it needs the deepest k to reach a budget the
+# other systems reach in tens of units.
+#
+# This is the depth that makes a budget cell measurable at all for Mem0: at its
+# published depth of 10 the whole ranking was ~200 tokens on that sample, so a
+# --context-budget 500 run could not fill the budget even by taking all of it,
+# and the cell came back context_underfilled.
+#
+# Depth for Mem0's OWN retriever (config key `retrieve_k`).
+native_top_k: 330

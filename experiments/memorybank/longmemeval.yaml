@@ -1,0 +1,152 @@
+# MemoryBank on LongMemEval-S, default config.
+#
+#   python -m evalgrid.pipeline.ingest           --exp experiments/memorybank/longmemeval.yaml --mem-base-url http://localhost:8000/v1
+#   python -m evalgrid.pipeline.qrels_has_answer --exp experiments/memorybank/longmemeval.yaml
+#   SPEC=experiments/memorybank/longmemeval.yaml bash experiments/run_all_retrieval.sh
+#   SPEC=experiments/memorybank/longmemeval.yaml bash experiments/run_all_answers.sh
+#   SPEC=experiments/memorybank/longmemeval.yaml bash experiments/run_all_judge.sh
+#
+# WHAT THIS ROW IS FOR. MemoryBank is the cheap floor: one LLM call per session,
+# no extraction, no graph, no fact schema. Its corpus is raw turn-pairs plus one
+# summary per session. Any system in this table that does not beat it is not
+# earning its extraction pipeline — that is the most informative thing this row
+# can produce, and it is worth reporting even (especially) if the floor wins.
+#
+# READ THIS BEFORE REPORTING A NUMBER FROM THIS SPEC.
+#
+# 1. The corpus mixes two granularities ON PURPOSE. Turn-pairs and session
+#    summaries go into one flat index and compete for the same top-k — that is
+#    MemoryBank's design, a hierarchy with no traversal cost. Every unit is
+#    tagged `granularity` in its metadata; break the retrieval metrics down by
+#    it before comparing against single-granularity systems. The open question
+#    worth answering here: do summaries win on multi-session-synthesis questions
+#    and lose on single-session-user ones? Nobody appears to have measured it.
+#
+# 2. Gold granularity is mixed too, for the same reason. A turn-pair unit's
+#    has_answer is the OR over at most two turns — the FINEST provenance of any
+#    constructed memory here, comparable with lightmem and a_mem. A summary
+#    unit's is the OR over its whole session, like simplemem and hypermem. Same
+#    caveat: split by granularity.
+#    candidate_source=sweep keeps the labeler segment as plain "has_answer".
+#
+# 3. Forgetting is OFF. The paper's headline mechanism deletes turns at
+#    index-build time from an unseeded coin flip, and on LongMemEval the answer
+#    lives in exactly one session — enabling it destroys recall irreproducibly.
+#    The config makes it non-destructive and seeded if you do enable it, and
+#    lets you choose between the paper's curve and the (inverted) one the code
+#    ships. If you report a forgetting number, say which curve you used: they
+#    are different systems.
+#
+# 4. `roles: all` is the default and the only faithful setting here. MemoryBank's
+#    unit IS a {query, response} exchange, so `user_only` empties the response
+#    side and leaves a user turn with a date prefix — it costs this system more
+#    than any other in the table. Run `user_only` only as a labelled ablation.
+#
+# 5. Nothing here reproduces a published number. MemoryBank predates LongMemEval
+#    and LoCoMo, evaluates only on its own 15-user synthetic set with 194
+#    human/LLM-graded probing questions, and its evaluation harness was never
+#    released (the *_eval prompt builders are defined and called from nowhere).
+
+system: memorybank
+dataset: longmemeval_s
+mem_model: Qwen/Qwen3-30B-A3B-Instruct-2507
+labeler_model: has_answer
+candidate_source: sweep   # keep plain "has_answer" segment (no "-retrieval" suffix)
+
+# Answer/judge models — part of the experiment (they key the answer output path).
+# Keep judge != gen to avoid self-grading bias.
+gen_model: Qwen/Qwen3-30B-A3B-Instruct-2507
+judge_model: gpt-4o-mini
+
+# THE RETRIEVER GRID — eight settings, identical on every system spec, so a cell
+# of the table means the same thing in every row. Entry
+# format matches the retrieve --retriever* flags and --native-retriever alike:
+# bm25 | sparse:MODEL | dense:MODEL[@http://host/v1] | rrf:MODEL[@url] (BM25 +
+# dense fused by reciprocal rank fusion). The @localhost entries need a vllm
+# embedding server on the matching port (:8001, :8002 — see README "vllm");
+# bm25, SPLADE-v3 and MiniLM load in-process.
+#
+# `retrievers:` ranks corpus.jsonl with no system loaded — the CONTROL.
+# `native_retrievers:` installs the same ranker INSIDE MemoryBank's own loop — the
+# SETTING. One string names the same retriever on both sides, so the pair of run
+# dirs differs by the `native-` prefix and nothing else.
+#
+# The MiniLM rows are MemoryBank's own EN encoder, so flat-MiniLM vs
+# native-MiniLM isolates the chronological regrouping it applies after ranking.
+# bm25 is an interesting row here rather than just a baseline: MemoryBank puts
+# the date inside the indexed text, which a lexical retriever matches directly.
+retrievers:
+  # --- sparse ---
+  - bm25
+  - sparse:naver/splade-v3
+  # --- dense ---
+  - dense:sentence-transformers/all-MiniLM-L6-v2          # MemoryBank's own EN encoder
+  - dense:Qwen/Qwen3-Embedding-0.6B@http://localhost:8001/v1
+  - dense:Qwen/Qwen3-Embedding-4B@http://localhost:8002/v1
+  # --- fusion: BM25 + dense, reciprocal rank fusion (rrf_k=60) ---
+  - rrf:sentence-transformers/all-MiniLM-L6-v2
+  - rrf:Qwen/Qwen3-Embedding-0.6B@http://localhost:8001/v1
+  - rrf:Qwen/Qwen3-Embedding-4B@http://localhost:8002/v1
+
+# The same eight, inside MemoryBank's own query loop.
+native_retrievers:
+  # --- sparse ---
+  - bm25
+  - sparse:naver/splade-v3
+  # --- dense ---
+  - dense:sentence-transformers/all-MiniLM-L6-v2          # MemoryBank's own EN encoder
+  - dense:Qwen/Qwen3-Embedding-0.6B@http://localhost:8001/v1
+  - dense:Qwen/Qwen3-Embedding-4B@http://localhost:8002/v1
+  # --- fusion: BM25 + dense, reciprocal rank fusion (rrf_k=60) ---
+  - rrf:sentence-transformers/all-MiniLM-L6-v2
+  - rrf:Qwen/Qwen3-Embedding-0.6B@http://localhost:8001/v1
+  - rrf:Qwen/Qwen3-Embedding-4B@http://localhost:8002/v1
+
+# --- Native path: the imposed retrieval depth -------------------------------
+# Read ONLY by the two stages that run MemoryBank's own loop
+# (pipeline/retrieve._run_native and pipeline/answer._run_native, live runs).
+# The flat sweep and the shared-prompt answer path ignore it — their depth is
+# the `--top-k` axis every system is compared on, default 10.
+#
+#   python -m evalgrid.pipeline.retrieve --retriever native \
+#       --exp experiments/memorybank/longmemeval.yaml
+#   python -m evalgrid.pipeline.answer --retriever native --prompt native \
+#       --exp experiments/memorybank/longmemeval.yaml \
+#       --from-retrieval <the dir above> --top-k 5    # or --context-budget 500
+#
+# WHY IT IS NOT SPELLED `top_k`. --top-k means two different things. On the
+# native path it is RETRIEVAL depth — retriever identity, pushed into the
+# system's own retriever before it runs, and keyed into the run directory as a
+# `-top100` segment (lib/paths.native_segment), so this condition can never
+# overwrite the published-depth control. On the shared path it is PROMPT depth,
+# the axis every system is compared on. One spec drives both halves of a sweep,
+# so the two cannot share a key: a `top_k: 100` here would silently move the
+# shared comparison from top10 to top100.
+#
+# NOT APPLIED ON A REPLAY (--from-retrieval). There --top-k is a cut over units
+# already retrieved — an answer-side axis that gets swept — so it comes from the
+# CLI or not at all.
+#
+# `--published-depth` OPTS OUT, and that is how the published-depth control runs
+# off this same spec: it retrieves at the depth in the system's own config and
+# its directory carries no `-top<k>`. scripts/query.sh passes it
+# whenever NATIVE_TOP_K is empty.
+#
+# The depth belongs in this spec rather than in evalgrid/configs/memorybank/default.yaml
+# because a knob set there changes the ranking while leaving the run in the same
+# directory as the setting before it.
+#
+# 100: 1.0 units/k and 509 tokens/k, measured from outputs/_smoke2_retrieval on
+# 2026-08-15 — ~2x headroom on both answer axes (top-50 memories, a 4000-token
+# budget), with depth the binding one for MemoryBank.
+#
+# This is also what makes a top-5 cell mean anything here: at its published
+# depth of 6 the whole ranking was 4 units on that sample (regrouping
+# concatenates hits sharing a date bucket, so 6 memories became 4 blocks), and
+# `--top-k 5` cut nothing at all.
+#
+# Depth for MemoryBank's OWN retriever (config key `retrieve_k`, upstream 6).
+# It counts MEMORIES, not the blocks they are regrouped into — `unit_id_groups`
+# in each trace records which ids a block holds, and pipeline/answer.py cuts on
+# the memory count so k means the same thing here as everywhere else.
+native_top_k: 100

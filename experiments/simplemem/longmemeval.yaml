@@ -1,0 +1,152 @@
+# SimpleMem on LongMemEval-S, default config (session-aligned windows).
+#
+#   python -m evalgrid.pipeline.ingest           --exp experiments/simplemem/longmemeval.yaml --mem-base-url http://localhost:8000/v1
+#   python -m evalgrid.pipeline.qrels_has_answer --exp experiments/simplemem/longmemeval.yaml
+#   SPEC=experiments/simplemem/longmemeval.yaml bash experiments/run_all_retrieval.sh
+#   SPEC=experiments/simplemem/longmemeval.yaml bash experiments/run_all_answers.sh
+#   SPEC=experiments/simplemem/longmemeval.yaml bash experiments/run_all_judge.sh
+#
+# READ THIS BEFORE REPORTING A NUMBER FROM THIS SPEC.
+#
+# 1. The qrels are COARSER here than for lightmem or a_mem. SimpleMem extracts a
+#    whole window in one LLM call and keeps no link from an entry back to a
+#    turn, so every entry from a window inherits has_answer from the window.
+#    With ingest_policy: session that is session-level relevance — the same
+#    granularity LongMemEval's own answer_session_ids ships at, but coarser than
+#    LightMem's per-fact source_id or A-Mem's one-note-per-turn. Retrieval
+#    metrics from this spec are comparable across SimpleMem variants; for
+#    cross-system retrieval numbers, run the LLM labeler instead (set
+#    labeler_model to a real model and drop candidate_source).
+#    candidate_source=sweep keeps the labeler segment as plain "has_answer".
+#
+# 2. Most of what SimpleMem is credited for is NOT measured by the five stages.
+#    Its query loop — information-requirements analysis, up to 4 rewritten
+#    sub-queries, tri-path union, two rounds of sufficiency reflection with
+#    follow-up queries, 5-8 LLM calls per question — is replaced by a single
+#    retrieve-top-k. Numbers from this spec are "SimpleMem's extracted facts as
+#    a retrieval corpus" and must be labelled that way, not as a reproduction of
+#    the paper's Table 2 (76.87 on GPT-4.1-mini / 83.97 on GPT-4.1, judged by
+#    gpt-4.1-mini). For the query loop itself, add the native pass:
+#
+#      python -m evalgrid.pipeline.answer --retriever native --prompt native --exp experiments/simplemem/longmemeval.yaml \
+#          --gen-base-url http://localhost:8000/v1 --mem-base-url http://localhost:8000/v1
+#      python -m evalgrid.pipeline.eval_retrieval --exp experiments/simplemem/longmemeval.yaml \
+#          --retriever native
+#
+#    This is the expensive one on this benchmark: those 5-8 LLM calls are per
+#    QUESTION and are billed to the memory layer, so --mem-base-url is required
+#    and the run is worth sharding (--num-shards). Its run.tsv also exposes
+#    something the answers alone hide — upstream's union has no final top-k, so
+#    a hard question can return most of the store.
+#
+# 3. The paper's adaptive retrieval depth (range [3, 20], gated by a
+#    query-complexity estimator) does not exist in the released code, so even
+#    the native path is a reproduction of the code, not of the paper.
+
+system: simplemem
+dataset: longmemeval_s
+mem_model: Qwen/Qwen3-30B-A3B-Instruct-2507
+labeler_model: has_answer
+candidate_source: sweep   # keep plain "has_answer" segment (no "-retrieval" suffix)
+
+# Answer/judge models — part of the experiment (they key the answer output path).
+# Keep judge != gen to avoid self-grading bias.
+gen_model: Qwen/Qwen3-30B-A3B-Instruct-2507
+judge_model: gpt-4o-mini
+
+# THE RETRIEVER GRID — eight settings, identical on every system spec, so a cell
+# of the table means the same thing in every row. Entry
+# format matches the retrieve --retriever* flags and --native-retriever alike:
+# bm25 | sparse:MODEL | dense:MODEL[@http://host/v1] | rrf:MODEL[@url] (BM25 +
+# dense fused by reciprocal rank fusion). The @localhost entries need a vllm
+# embedding server on the matching port (:8001, :8002 — see README "vllm");
+# bm25, SPLADE-v3 and MiniLM load in-process.
+#
+# `retrievers:` ranks corpus.jsonl with no system loaded — the CONTROL.
+# `native_retrievers:` installs the same ranker INSIDE SimpleMem's own loop — the
+# SETTING. One string names the same retriever on both sides, so the pair of run
+# dirs differs by the `native-` prefix and nothing else.
+#
+# The Qwen3-0.6B rows are SimpleMem's own encoder, so flat-0.6B vs native-0.6B
+# isolates the planning, the tri-path union and the two reflection rounds.
+# bm25 is a fair row rather than a strawman: SimpleMem's own lexical leg is
+# Tantivy BM25 over the same field, and its merge applies no score fusion, so a
+# plain BM25 run may well beat the native union.
+retrievers:
+  # --- sparse ---
+  - bm25
+  - sparse:naver/splade-v3
+  # --- dense ---
+  - dense:sentence-transformers/all-MiniLM-L6-v2
+  - dense:Qwen/Qwen3-Embedding-0.6B@http://localhost:8001/v1   # SimpleMem's own encoder (paper Table 7)
+  - dense:Qwen/Qwen3-Embedding-4B@http://localhost:8002/v1
+  # --- fusion: BM25 + dense, reciprocal rank fusion (rrf_k=60) ---
+  - rrf:sentence-transformers/all-MiniLM-L6-v2
+  - rrf:Qwen/Qwen3-Embedding-0.6B@http://localhost:8001/v1
+  - rrf:Qwen/Qwen3-Embedding-4B@http://localhost:8002/v1
+
+# The same eight, inside SimpleMem's own query loop.
+#
+# NOTE the native side only replaces the SEMANTIC leg:
+# the output is still `X ∪ tantivy-BM25 ∪ SQL`. Pair a row with
+# `retrieval.legs: [semantic]` for the single-retriever cell.
+native_retrievers:
+  # --- sparse ---
+  - bm25
+  - sparse:naver/splade-v3
+  # --- dense ---
+  - dense:sentence-transformers/all-MiniLM-L6-v2
+  - dense:Qwen/Qwen3-Embedding-0.6B@http://localhost:8001/v1   # SimpleMem's own encoder (paper Table 7)
+  - dense:Qwen/Qwen3-Embedding-4B@http://localhost:8002/v1
+  # --- fusion: BM25 + dense, reciprocal rank fusion (rrf_k=60) ---
+  - rrf:sentence-transformers/all-MiniLM-L6-v2
+  - rrf:Qwen/Qwen3-Embedding-0.6B@http://localhost:8001/v1
+  - rrf:Qwen/Qwen3-Embedding-4B@http://localhost:8002/v1
+
+# --- Native path: the imposed retrieval depth -------------------------------
+# Read ONLY by the two stages that run SimpleMem's own loop
+# (pipeline/retrieve._run_native and pipeline/answer._run_native, live runs).
+# The flat sweep and the shared-prompt answer path ignore it — their depth is
+# the `--top-k` axis every system is compared on, default 10.
+#
+#   python -m evalgrid.pipeline.retrieve --retriever native \
+#       --exp experiments/simplemem/longmemeval.yaml \
+#       --mem-base-url http://localhost:8000/v1
+#   python -m evalgrid.pipeline.answer --retriever native --prompt native \
+#       --exp experiments/simplemem/longmemeval.yaml \
+#       --from-retrieval <the dir above> --top-k 5    # or --context-budget 500
+#
+# WHY IT IS NOT SPELLED `top_k`. --top-k means two different things. On the
+# native path it is RETRIEVAL depth — retriever identity, pushed into the
+# system's own retriever before it runs, and keyed into the run directory as a
+# `-top45` segment (lib/paths.native_segment), so this condition can never
+# overwrite the published-depth control. On the shared path it is PROMPT depth,
+# the axis every system is compared on. One spec drives both halves of a sweep,
+# so the two cannot share a key: a `top_k: 45` here would silently move the
+# shared comparison from top10 to top45.
+#
+# NOT APPLIED ON A REPLAY (--from-retrieval). There --top-k is a cut over units
+# already retrieved — an answer-side axis that gets swept — so it comes from the
+# CLI or not at all.
+#
+# `--published-depth` OPTS OUT, and that is how the published-depth control runs
+# off this same spec: it retrieves at the depth in the system's own config and
+# its directory carries no `-top<k>`. scripts/query.sh passes it
+# whenever NATIVE_TOP_K is empty.
+#
+# The depth belongs in this spec rather than in evalgrid/configs/simplemem/default.yaml
+# because a knob set there changes the ranking while leaving the run in the same
+# directory as the setting before it.
+#
+# 45: 2.6 units/k and 171 tokens/k, measured from outputs/_smoke2_retrieval on
+# 2026-08-15 — ~2x headroom on both answer axes (top-50 memories, a 4000-token
+# budget), with tokens the binding one for SimpleMem.
+#
+# Depth for SimpleMem's OWN retrieval, which unions three paths.
+# SimpleMemPlugin.apply_retrieval_budget sets the SEMANTIC path (the dense
+# top-k directly comparable to another system's) and leaves the keyword and
+# structured side channels at upstream's 5 each — the ratio the union was tuned
+# around. The union has no final cap and planning can issue up to four
+# sub-queries, so the context can still exceed k; `context_items` on each answer
+# record is what keeps that visible rather than assumed away.
+native_top_k: 45

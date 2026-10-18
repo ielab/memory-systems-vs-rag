@@ -1,0 +1,59 @@
+# Raw turns, BOTH speakers, on LongMemEval-S — the NAIVE RAG side of RQ3, and
+# the source of RQ1's Naive RAG / Full-context / Oracle baselines.
+#
+# This is the PUBLISHED baseline. LightMem's paper (arXiv 2510.18866, Table 7)
+# scores Naive RAG at 98.21 on the 56 single-session-assistant questions, which
+# is only reachable with assistant turns in the index. The user-only corpus is
+# experiments/user_turns/longmemeval.yaml, kept as an ablation.
+#
+# Not a memory system: there is no construction stage and no plugin. The corpus
+# is written by evalgrid.pipeline.qrels_turns, so these coordinates MUST match
+# what it wrote:
+#   outputs/_qrels/all_turns/<dataset>/none/has_answer/
+# mem_model is the literal string "none" for that reason, and
+# candidate_source=sweep keeps the labeler segment as plain "has_answer"
+# ("retrieval" would append "-retrieval" and point at a tree never built here).
+#
+#   python -m evalgrid.pipeline.qrels_turns --dataset longmemeval_s --roles all
+#   SPEC=experiments/all_turns/longmemeval.yaml bash experiments/run_all_retrieval.sh
+#   SPEC=experiments/all_turns/longmemeval.yaml bash experiments/run_all_answers.sh
+#   SPEC=experiments/all_turns/longmemeval.yaml bash experiments/run_all_judge.sh
+#
+# Note there is no ingest line above — that is the whole point of this spec.
+# Zero construction cost is the baseline every memory system is charged against.
+# The Full-context baseline comes from the same corpus:
+#   SPEC=... FULL_ONLY=1 bash experiments/run_all_answers.sh
+#
+# Corpus units carry a speaker prefix ("user: ..." / "assistant: ..."), because
+# in a mixed corpus the speaker is real signal and every memory system here sees
+# role markers too. See evalgrid/pipeline/qrels_turns.py.
+
+system: all_turns
+dataset: longmemeval_s
+mem_model: none
+labeler_model: has_answer
+candidate_source: sweep
+
+# Answer/judge models. gpt-4o-mini is this project's judge, held fixed across
+# every system so the cross-system table is comparable. Override per-run with
+# GEN_MODEL=... / JUDGE_MODEL=... (JUDGE_MODEL=gpt-5.5 is LightMem's primary
+# judge — metrics files coexist per judge).
+gen_model: Qwen/Qwen3-30B-A3B-Instruct-2507
+judge_model: gpt-4o-mini
+
+# The same 11 retrievers as the LightMem spec, so RQ3 compares matched
+# retrievers over the two representations. See
+# experiments/lightmem/longmemeval.yaml for the entry format.
+retrievers:
+  # The paper's eight retrievers (RQ2).
+  # --- sparse ---
+  - bm25
+  - sparse:naver/splade-v3
+  # --- dense ---
+  - dense:sentence-transformers/all-MiniLM-L6-v2
+  - dense:Qwen/Qwen3-Embedding-0.6B@http://localhost:8001/v1
+  - dense:Qwen/Qwen3-Embedding-4B@http://localhost:8002/v1
+  # --- fusion: BM25 + dense, reciprocal rank fusion ---
+  - rrf:sentence-transformers/all-MiniLM-L6-v2
+  - rrf:Qwen/Qwen3-Embedding-0.6B@http://localhost:8001/v1
+  - rrf:Qwen/Qwen3-Embedding-4B@http://localhost:8002/v1

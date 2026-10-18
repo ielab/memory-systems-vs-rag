@@ -1,0 +1,146 @@
+# A-Mem on LongMemEval-S, default config.
+#
+# Scored against the per-note has_answer flag rather than an LLM labeler: a note
+# is relevant iff it was constructed from a turn LongMemEval-S marks has_answer.
+# A-Mem builds one note per turn — BOTH speakers, per the repo-wide `roles: all`
+# (README "Speakers: both"), not user turns only as this line used to say. So
+# the mapping is exact, which is the point: there is no extraction step to lose
+# provenance through, which is not true of LightMem. Verified on
+# outputs/_smoke4: 2,180 notes against the same 2,180 turns, and the 5 notes
+# flagged has_answer are exactly the 5 answer-bearing turns in those samples.
+# candidate_source=sweep keeps the labeler segment as plain "has_answer"
+# ("retrieval" would append "-retrieval" and point at a tree never built here).
+#
+#   python -m evalgrid.pipeline.ingest           --exp experiments/a_mem/longmemeval.yaml --mem-base-url http://localhost:8000/v1
+#   python -m evalgrid.pipeline.qrels_has_answer --exp experiments/a_mem/longmemeval.yaml
+#   SPEC=experiments/a_mem/longmemeval.yaml bash experiments/run_all_retrieval.sh
+#   SPEC=experiments/a_mem/longmemeval.yaml bash experiments/run_all_answers.sh
+#   SPEC=experiments/a_mem/longmemeval.yaml bash experiments/run_all_judge.sh
+#
+# The memory model is needed at ANSWER time too, not only ingest: A-Mem
+# generates query keywords with it before every native retrieval.
+#
+# Not measured by the five stages above: A-Mem-as-published. They answer from
+# the flat corpus with the shared prompt — which is the point, since it holds
+# retriever and prompt fixed so the comparison is about representation — so
+# query-keyword generation and link expansion at retrieval time are absent.
+# Numbers from those five stages are "A-Mem's notes as a retrieval corpus" and
+# should be labelled that way.
+#
+# For A-Mem as published, add the native pass. It writes its own answers AND a
+# run.tsv of the notes its own retriever touched, scored against these same
+# has_answer qrels:
+#
+#   python -m evalgrid.pipeline.answer --retriever native --prompt native --exp experiments/a_mem/longmemeval.yaml \
+#       --gen-base-url http://localhost:8000/v1 --mem-base-url http://localhost:8000/v1
+#   python -m evalgrid.pipeline.eval_retrieval --exp experiments/a_mem/longmemeval.yaml \
+#       --retriever native
+#
+# --mem-base-url is required there and not above: A-Mem calls the memory model
+# at query time to generate the retrieval keywords. Budget for it — that is one
+# extra LLM call per question, on top of the generator's.
+
+system: a_mem
+dataset: longmemeval_s
+mem_model: Qwen/Qwen3-30B-A3B-Instruct-2507
+labeler_model: has_answer
+candidate_source: sweep   # keep plain "has_answer" segment (no "-retrieval" suffix)
+
+# Answer/judge models — part of the experiment (they key the answer output path).
+# Keep judge != gen to avoid self-grading bias.
+gen_model: Qwen/Qwen3-30B-A3B-Instruct-2507
+judge_model: gpt-4o-mini
+
+# THE RETRIEVER GRID — eight settings, identical on every system spec, so a cell
+# of the table means the same thing in every row. Entry
+# format matches the retrieve --retriever* flags and --native-retriever alike:
+# bm25 | sparse:MODEL | dense:MODEL[@http://host/v1] | rrf:MODEL[@url] (BM25 +
+# dense fused by reciprocal rank fusion). The @localhost entries need a vllm
+# embedding server on the matching port (:8001, :8002 — see README "vllm");
+# bm25, SPLADE-v3 and MiniLM load in-process.
+#
+# `retrievers:` ranks corpus.jsonl with no system loaded — the CONTROL.
+# `native_retrievers:` installs the same ranker INSIDE A-Mem's own loop — the
+# SETTING. One string names the same retriever on both sides, so the pair of run
+# dirs differs by the `native-` prefix and nothing else.
+#
+# The MiniLM rows are A-Mem's own encoder, so flat-MiniLM vs native-MiniLM
+# isolates exactly the two query-side features the flat path drops: the
+# LLM-generated keyword query and the one-hop `links` expansion.
+retrievers:
+  # --- sparse ---
+  - bm25
+  - sparse:naver/splade-v3
+  # --- dense ---
+  - dense:sentence-transformers/all-MiniLM-L6-v2          # A-Mem's own encoder (paper §4.2)
+  - dense:Qwen/Qwen3-Embedding-0.6B@http://localhost:8001/v1
+  - dense:Qwen/Qwen3-Embedding-4B@http://localhost:8002/v1
+  # --- fusion: BM25 + dense, reciprocal rank fusion (rrf_k=60) ---
+  - rrf:sentence-transformers/all-MiniLM-L6-v2
+  - rrf:Qwen/Qwen3-Embedding-0.6B@http://localhost:8001/v1
+  - rrf:Qwen/Qwen3-Embedding-4B@http://localhost:8002/v1
+
+# The same eight, inside A-Mem's own query loop.
+native_retrievers:
+  # --- sparse ---
+  - bm25
+  - sparse:naver/splade-v3
+  # --- dense ---
+  - dense:sentence-transformers/all-MiniLM-L6-v2          # A-Mem's own encoder (paper §4.2)
+  - dense:Qwen/Qwen3-Embedding-0.6B@http://localhost:8001/v1
+  - dense:Qwen/Qwen3-Embedding-4B@http://localhost:8002/v1
+  # --- fusion: BM25 + dense, reciprocal rank fusion (rrf_k=60) ---
+  - rrf:sentence-transformers/all-MiniLM-L6-v2
+  - rrf:Qwen/Qwen3-Embedding-0.6B@http://localhost:8001/v1
+  - rrf:Qwen/Qwen3-Embedding-4B@http://localhost:8002/v1
+
+# --- Native path: the imposed retrieval depth -------------------------------
+# Read ONLY by the two stages that run A-Mem's own loop
+# (pipeline/retrieve._run_native and pipeline/answer._run_native, live runs).
+# The flat sweep and the shared-prompt answer path ignore it — their depth is
+# the `--top-k` axis every system is compared on, default 10.
+#
+#   python -m evalgrid.pipeline.retrieve --retriever native \
+#       --exp experiments/a_mem/longmemeval.yaml \
+#       --mem-base-url http://localhost:8000/v1
+#   python -m evalgrid.pipeline.answer --retriever native --prompt native \
+#       --exp experiments/a_mem/longmemeval.yaml \
+#       --from-retrieval <the dir above> --top-k 5    # or --context-budget 500
+#
+# WHY IT IS NOT SPELLED `top_k`. --top-k means two different things. On the
+# native path it is RETRIEVAL depth — retriever identity, pushed into the
+# system's own retriever before it runs, and keyed into the run directory as a
+# `-top25` segment (lib/paths.native_segment), so this condition can never
+# overwrite the published-depth control. On the shared path it is PROMPT depth,
+# the axis every system is compared on. One spec drives both halves of a sweep,
+# so the two cannot share a key: a `top_k: 25` here would silently move the
+# shared comparison from top10 to top25.
+#
+# NOT APPLIED ON A REPLAY (--from-retrieval). There --top-k is a cut over units
+# already retrieved — an answer-side axis that gets swept — so it comes from the
+# CLI or not at all.
+#
+# `--published-depth` OPTS OUT, and that is how the published-depth control runs
+# off this same spec: it retrieves at the depth in the system's own config and
+# its directory carries no `-top<k>`. scripts/query.sh passes it
+# whenever NATIVE_TOP_K is empty.
+#
+# The depth belongs in this spec rather than in evalgrid/configs/a_mem/default.yaml
+# because a knob set there changes the ranking while leaving the run in the same
+# directory as the setting before it.
+#
+# 25: 4.3 units/k and 2,032 tokens/k, measured from outputs/_smoke2_retrieval on
+# 2026-08-15 — ~2x headroom on both answer axes (top-50 memories, a 4000-token
+# budget), with depth the binding one for A-Mem. Its units are by far the
+# largest in the grid, which is why its k is the smallest.
+#
+# The tokens/k above was measured BEFORE AMemSystem.retrieve_trace began
+# dropping the notes link expansion returns twice (~45% of the block on that
+# sample), so the real figure is nearer 1,100 — 25 still clears both axes, since
+# 25 hits expand to ~60 distinct notes.
+#
+# Depth for A-Mem's OWN retriever (config key `retrieve_k`, paper Eq. 10).
+# Link expansion is not capped by it and is not meant to be — that expansion is
+# the method this path exists to measure; `context_items` on each answer record
+# reports what actually landed.
+native_top_k: 25

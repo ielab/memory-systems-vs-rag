@@ -1,0 +1,382 @@
+# ===========================================================================
+# HyperMem — arXiv 2604.08256 (ACL 2026) / EverMind-AI/HyperMem
+#
+# THE NATIVE-PIPELINE QUERY CONFIG. Same store, published query behaviour.
+#
+# This is default.yaml with the QUERY-SIDE keys returned to what hypermem
+# published, and every INGEST-SIDE key left byte-identical. That split is the
+# whole point of the file: the stores in outputs/_memory/ were built under
+# default.yaml and are treated as fixed, so anything read at construction time
+# must not move or the config would no longer describe the store it is pointed
+# at. `diff default.yaml naive_query.yaml` should show query keys and nothing
+# else — if it ever shows an ingest key, this file is wrong.
+#
+# Use it with --config and --native-variant, NOT --mem-variant: --mem-variant
+# suffixes outputs/_memory/ and would send the run looking for a store that was
+# never built. --native-variant suffixes only the retrieval and answer dirs.
+#
+#   python -m evalgrid.pipeline.retrieve --retriever native \
+#       --exp experiments/hypermem/longmemeval.yaml \
+#       --config evalgrid/configs/hypermem/naive_query.yaml \
+#       --native-variant naive --published-depth
+#
+#   python -m evalgrid.pipeline.answer --retriever native --prompt native \
+#       --exp experiments/hypermem/longmemeval.yaml \
+#       --config evalgrid/configs/hypermem/naive_query.yaml \
+#       --native-variant naive --from-retrieval <the dir the above wrote>
+#
+# --published-depth is REQUIRED. Without it the spec's native_top_k (95)
+# overrides the published depth below and you measure the imposed one instead.
+#
+# WHAT THIS FILE STILL DOES NOT REPRODUCE:
+#   * the answer prompt. --prompt native returns the SHARED prompt. This is the
+#     one system where a port is actually available: the CoT template is
+#     imported verbatim in systems/hypermem/locomo.py and longmemeval.py could
+#     do the same. Until it does, answer_max_tokens: 4096 is sized for a CoT
+#     prompt that is not being sent.
+#   * the generator and judge — paper §4.1 answers with GPT-4.1-mini and
+#     averages a GPT-4o-mini judge over 3 runs; we use the shared pair once.
+#     A number from this file is NOT a reproduction of 92.73.
+#   * NOTE the reranker below is ON, which is the paper's setting but breaks
+#     the repo-wide no-second-stage policy. HyperMem is
+#     the only system here that ships a cross-encoder, so report this as a
+#     labelled extra row rather than as the comparable native row.
+# ===========================================================================
+
+# HyperMem configuration — aligned with EverMind-AI/HyperMem (vendor/hypermem)
+# and the paper (arXiv 2604.08256, ACL 2026), with the deviations marked
+# DEVIATION below.
+#
+# CLI overrides injected at runtime (HyperMemPlugin.apply_mem_model):
+#   memory_llm.model    ← --mem-model
+#   memory_llm.base_url ← --mem-base-url
+#
+# The memory LLM is served OpenAI-compatible by vLLM, same endpoint as stage 1:
+#   vllm serve Qwen/Qwen3-30B-A3B-Instruct-2507 --port 8000 ...
+#   python -m evalgrid.pipeline.ingest --system hypermem --dataset longmemeval_s \
+#       --mem-model Qwen/Qwen3-30B-A3B-Instruct-2507 \
+#       --mem-base-url http://localhost:8000/v1
+#
+# Unlike A-Mem and SimpleMem, this MEMORY model is not needed at answer time —
+# nothing in the funnel prompts it. The funnel is not model-free, though: under
+# this file's defaults a native run needs ONE other served model at query time,
+# the embedder (:11810), for the dense leg of `retrieval_type: rrf`. The
+# cross-encoder reranker (:12810) is OFF here and everywhere else in this repo
+# (see the rerank block at the bottom, and our development notes), so an
+# end-to-end native run is two servers plus the generator, not three.
+#
+# ---------------------------------------------------------------------------
+# COST. Read this before starting a 500-sample run.
+#
+# Per sample, with E sessions ending in T topics, the ingest spends:
+#     E                episode-memory calls        (1 per session)
+#     ~sum ceil(T_i/topic_match_batch_size)        topic matching, quadratic in T
+#     1 per new topic + 1 per (episode, matched topic) pair
+#     1 per topic touched, per episode             episode role/weight assignment
+#     2 per topic                                  facts + fact roles
+#
+# On LongMemEval-S (E≈50, and haystack sessions are mostly unrelated distractors
+# so T≈E) that is a few hundred LLM calls per sample — hundreds of thousands
+# across the benchmark. our development notes call cost, not
+# correctness, the blocker for this system, and the numbers above are why. Shard
+# ingest (--num-shards) and watch outputs/_memory/.../ingest_usage.json.
+# ---------------------------------------------------------------------------
+
+memory_llm:
+  api_key: token          # vllm accepts any non-empty string
+  temperature: 0.0        # upstream's vllm profile
+  # Upstream's vllm profile; a topic's fact set is long.
+  #
+  # This number is only safe against a big enough window: it is RESERVED out of
+  # every request, so the usable prompt is (max-model-len - 20000). At 32768
+  # that left 12.7k tokens, and a topic whose episodes exceeded it produced a
+  # 400 that upstream's unbounded retry loop then sent 331 times before the
+  # stage gave up and dropped every fact for that topic.
+  #
+  # scripts/ingest.sh therefore serves hypermem at CTX_LONG.
+  # If you serve it yourself, keep max-model-len >= max_tokens + your longest
+  # prompt, or lower this. A rejection is no longer silent either way: the
+  # provider raises FatalLLMError on the first one instead of looping, and
+  # meta.json reports fatal_calls.
+  max_tokens: 20000
+  # response_format={"type": "json_object"} handling: "auto" tries it and falls
+  # back to plain prompting if the server rejects it, "on" requires it, "off"
+  # never sends it. Upstream requests it on nearly every extraction call and
+  # repairs malformed output with json_repair, so "auto" is safe either way.
+  json_mode: auto
+  # model and base_url injected from CLI
+
+# --- Ingest -----------------------------------------------------------------
+
+# Which speakers reach the extractor (LongMemEval only; LoCoMo always ingests
+# both). `all` is upstream's setting: HyperMem's LoCoMo pipeline feeds the whole
+# message stream, both speakers, and its episode boundaries are detected over
+# that stream. It is also what makes the 56 single-session-assistant questions
+# answerable — LightMem's own paper (Table 7) scores every method on them rather
+# than excluding them, so `user_only` would be this repo's protocol, not anyone's
+# published one. Set `user_only` only as a labelled ablation.
+roles: all
+
+# Topics per LLM matching call. Upstream hardcodes 10 in stage 2. Raising it
+# cuts the number of calls linearly but puts more topics in one prompt, and the
+# matcher's precision on a long list is not something upstream measured.
+topic_match_batch_size: 10
+
+# DEVIATION, and an important one. Five of upstream's extraction stages retry
+# schema-invalid responses inside `while True:` with no attempt limit and a bare
+# `except Exception`, so nothing raised from inside can stop them — a model that
+# cannot satisfy one validator burns calls until the job is killed. Every
+# extractor call here runs under asyncio.wait_for with this budget; the
+# cancellation is the only thing those handlers do not swallow. Raise it for a
+# slow endpoint, but do not remove it.
+extraction_timeout_seconds: 600
+
+# Attempts per LLM call inside our own provider (transport-level retries, not
+# the extractors' validation retries above).
+#
+# 1 = send it once, and if it fails, fail. This is the repo-wide policy, not a
+# hypermem setting: a retried failure is a failure that costs N times as much
+# and reports as clean, and every retry loop in the stack was hiding one. The
+# provider raises LLMCallFailed (a BaseException) when this is exhausted, which
+# is what stops upstream's `while True: ... except Exception` from sending the
+# same request again behind our back.
+#
+# Raising this above 1 makes flakiness invisible again — the run gets slower and
+# quieter rather than louder. If an endpoint really is unreliable, fix the
+# endpoint; failures.jsonl marks non-deterministic failures precisely so that
+# case is distinguishable.
+max_extraction_retries: 1
+
+# Seconds between synthesised per-message timestamps inside a session. Upstream's
+# LoCoMo loader uses 30s; the messages of one session share one date otherwise.
+per_message_seconds: 30
+
+# Drop each episode's `original_data` (the verbatim message list) from the saved
+# store. It duplicates the raw turn corpus, dominates file size, and no
+# retrieval path reads it — stage 3 indexes subject/summary/episode_description
+# and stage 4 renders episode_description.
+drop_original_data: true
+
+# Which hypergraph levels become retrieval corpus units:
+#   facts+episodes  what upstream's default output_type "011" feeds its
+#                   generator, so the flat-corpus run swaps the retriever and
+#                   nothing else. (default)
+#   facts           the atomic, self-contained level only
+#   facts+episodes+topics  adds topic nodes, which are NOT self-contained
+#                   (a title plus a cluster summary) and which upstream leaves
+#                   out of the answer context.
+# Recorded into each store's meta.json at save time, so editing this later does
+# not silently change the corpus of a store already built.
+corpus_levels: facts+episodes
+
+# Upstream prints every prompt (first 1000 chars) and every raw response, per
+# call, on a path that runs hundreds of calls per sample.
+silence_upstream_stdout: true
+
+# --- Native retrieval -------------------------------------------------------
+# Only used by HyperMem's OWN query path (benchmarks.runner phase="answer").
+# The staged pipeline's retrieve stage ignores all of it and ranks the flat
+# corpus with its own retriever and top-k.
+#
+# THREE configurations exist and none of them are the same. Know which you mean
+# before quoting a number:
+#
+#   (a) THE PAPER, §4.1 of arXiv:2604.08256 — the setting behind 92.73 on LoCoMo:
+#         retrieval_type   rrf  (BM25 ∪ dense, fused by reciprocal rank fusion)
+#         embedder         Qwen3-Embedding-4B, vLLM, :11810/v1
+#         reranker         Qwen3-Reranker-4B,  vLLM, :12810   (ON)
+#         top_k            100 initial → 10 topics / 10 episodes / 30 facts
+#         lambda           0.5   (hyperedge embedding propagation, "sum")
+#         answer           GPT-4.1-mini, chain-of-thought
+#         judge            GPT-4o-mini, averaged over 3 independent runs
+#       (Figure 4's lambda panel is captioned "10-15-30", contradicting §4.1's
+#       10/10/30 on episode top-k. The paper is inconsistent; §4.1 is the
+#       Implementation Details section, so it is the one taken as authoritative.)
+#
+#   (b) config.py's OWN DEFAULTS — which reproduce neither (a) nor us:
+#         use_reranker false (env HYPERMEM_USE_RERANKER), top_k 15/20/30.
+#       Reproducing the paper from the vendored code therefore needs the env
+#       var set AND two top_k overrides AND both vLLM servers. A fresh clone
+#       run as-shipped does not give you 92.73.
+#
+#   (c) OURS — the block below. retrieval_type, embedder, depths, output_type,
+#       lambda and the aggregate all follow (a). TWO things differ, both
+#       deliberate:
+#
+#       1. The answer model is the harness's shared generator, so every system
+#          in the grid is compared under one generator. A number from this
+#          config is therefore not a reproduction of 92.73 — the generator and
+#          the judge both differ.
+#       2. NO CROSS-ENCODER: `reranker.enabled: false`. Repo-wide policy
+#          — the axis under test is the FIRST-STAGE
+#          ranking function, and a cross-encoder re-scoring ~100 candidates
+#          absorbs much of the difference between two first stages. HyperMem is
+#          the only system in this grid that ships one, so leaving it on would
+#          make its rows the one place a second stage is doing the work.
+#
+#       (2) is not a free switch, and the reason is not the obvious one. It was
+#       once justified by a comment claiming the reranker "runs after the
+#       funnel, so it cannot change what the hyperedges admit". That was wrong.
+#       stage4 L552/L665/L781 read
+#       `initial_candidates if use_reranker else <layer>_top_k`, so turning it
+#       off ALSO narrows layers 1 and 2 from the 100-candidate pool to their own
+#       top_k, and those survivors are what `get_connected_episodes` /
+#       `get_connected_facts` traverse. Off is a DIFFERENT funnel, not the same
+#       funnel minus a sort. Report these rows as the no-rerank variant — the
+#       run dir says so, `-norerank` (plugin.native_retriever_name).
+#
+#       The machinery for (a) stays in the tree
+#       (evalgrid/systems/hypermem/reranker.py, HyperMemBase._reranker): a
+#       published-setting reference row costs `enabled: true` plus the :12810
+#       server, and nothing else.
+retrieval:
+  # rrf = BM25 ∪ dense, fused by reciprocal rank fusion at all three layers.
+  # Upstream's values: keyword (BM25 only) | vector (dense only) | rrf.
+  #
+  # This matches (a) and (b), and it REQUIRES the `embedding:` block below plus
+  # a reachable embedding server. There is a reason it is worth the server:
+  # the hyperedge weights are never fused into a retrieval score (upstream says
+  # so in its own comments), so their ONLY route into ranking is the dense
+  # leg's propagation, h'_v = h_v + 0.5·Agg_e(h_e). Run `keyword` and the
+  # hypergraph degrades to a pure candidate filter — which is an ablation of
+  # the published method, not a cheaper spelling of it. Reporting a `keyword`
+  # number as "HyperMem" overstates what was run; call it the BM25-only variant.
+  #
+  # `keyword` remains fully supported and needs no server. Both are worth having:
+  # rrf-vs-keyword is a clean measurement of what propagation is worth, and the
+  # paper's own Table 2 suggests the answer may be small — removing topic
+  # retrieval entirely (w/o TR) costs 0.72 points, 92.66 → 91.94, against 3.76
+  # for dropping episode *context*.
+  retrieval_type: rrf
+  # Which levels enter the answer context: topic/episode/fact as three bits.
+  # "011" (episodes + facts, no topics) is upstream's default.
+  output_type: "011"
+  # "fix" uses the top_k block below; "ada" ignores it and picks per question
+  # type from upstream's adaptive_retrieval_config table.
+  rerank_type: fix
+  top_k:
+    # DEAD CONFIG while `reranker.enabled` is false. Each of the three layers
+    # reads `initial_candidates if use_reranker else <layer>_top_k` (stage4
+    # L552/L665/L781), so with no cross-encoder every layer slices straight to
+    # its own top_k and this number is never read. Left at upstream's value,
+    # which is also the paper's, so the block stays diffable against config.py
+    # and flipping the reranker back on restores (a) exactly — at which point
+    # it becomes both the pool the cross-encoder ranks and a recall CEILING on
+    # that layer.
+    initial_candidates: 100
+    # THE PAPER'S DEPTHS (a), not config.py's (b). §4.1: top-10 topics, top-10
+    # episodes, top-30 facts. With the reranker off these are what each layer
+    # takes DIRECTLY off the rrf ranking, rather than the survivors of a
+    # cross-encoder pass over 100 candidates — the depths are the paper's, the
+    # regime they are applied in is not. That is the whole content of the
+    # `-norerank` suffix.
+    #
+    # §4.4 finds topic top-k by far the most sensitive knob (76.88% at k=1
+    # rising to 92.66% at k=10, still climbing where they stopped), so this is
+    # still the first number to raise if native-path recall looks poor —
+    # but doing so is now a departure from (a) rather than a correction to a
+    # depth that was being applied off a weaker first stage.
+    topic_top_k: 10
+    episode_top_k: 10
+    fact_top_k: 30
+
+# --- Dense leg --------------------------------------------------------------
+# Read only when retrieval.retrieval_type is rrf or vector. A keyword run never
+# constructs an embedder, so it still needs no server.
+embedding:
+  # Paper §4.1's encoder. Served over an OpenAI-compatible endpoint; the model
+  # id is routed by evalgrid.models.factory.load_embedder like any other
+  # embedder in the grid, so there is no `'Qwen3' in model_name` guard here —
+  # that lives in the vendored provider, which this path does not use.
+  model: Qwen/Qwen3-Embedding-4B
+  # The server ROOT, not the route. Upstream POSTs its `base_url` verbatim while
+  # config.py defaults it to `.../v1`, so a stock clone cannot reach its own
+  # server; the harness's vLLM embedder appends `/embeddings` itself.
+  base_url: http://localhost:11810/v1
+  batch_size: 256
+
+  # Hyperedge propagation, upstream's `node_emb_update_weight` and
+  # `hyperedge_emb_aggregate_type`. Paper §4.1 pins lambda at 0.5 and §4.4 finds
+  # 0.5 optimal (92.66, against 91.69 at 0.0 and 91.88 at 1.0). "sum" makes
+  # nodes on many hyperedges move further than nodes on few; "mean" moves them
+  # all equally. config.py ships "sum" and Figure 4 is captioned "under sum".
+  alpha: 0.5
+  aggregate_type: sum
+
+  # Whether queries get Qwen3-Embedding's retrieval-instruction prefix.
+  #
+  # FALSE IS UPSTREAM'S BEHAVIOUR AND IS PROBABLY WRONG. Qwen3-Embedding is
+  # asymmetric and instruction-tuned: it expects queries prefixed and documents
+  # bare. Upstream's provider has one code path for both and prefixes neither,
+  # so 92.73 was measured without it. Turning this on should HELP, which is
+  # exactly why it is off by default — it would quietly make our HyperMem a
+  # stronger system than the published one while still wearing its name. Flip
+  # it as a labelled ablation, not as a fix.
+  query_instruction: false
+
+# --- Cross-encoder rerank ---------------------------------------------------
+# OFF, on this config and on every other HyperMem config in the repo. Repo-wide
+# policy: no second stage on any system, because the
+# thing being measured is the first one. Everything below is read only when
+# `enabled` is true and is kept so the published setting stays one flip away.
+#
+# Two consequences of `false`, both already covered in (c) above and repeated
+# here because this is where people look:
+#
+#   * no reranker is constructed and the :12810 server is not needed — a native
+#     run needs only the embedder (:11810) at query time;
+#   * layers 1 and 2 narrow from `initial_candidates` (100) to their own `top_k`
+#     (stage4 L552/L665), so this is a DIFFERENT funnel and not merely an
+#     unsorted one. The run dir carries `-norerank`
+#     (plugin.native_retriever_name); report the rows under that name.
+#
+# COST, if it is ever turned back on. Up to `initial_candidates` pairs per layer
+# per question — ~300 one-token completions on a 4B model for every question,
+# batched below. Cheap per pair, but it needs a THIRD served model alongside the
+# generator and the embedder:
+#
+#   vllm serve Qwen/Qwen3-Reranker-4B --port 12810
+#
+# and it makes a native run stop being LLM-free at query time: the
+# `apply_mem_model` docstrings that say "no LLM in the loop" would then mean "no
+# *memory* LLM", with the cross-encoder a served model like any other.
+reranker:
+  # NAIVE: paper setting (a), §4.1. Needs Qwen3-Reranker-4B on :12810.
+  #   This also makes initial_candidates: 100 live again at all three layers
+  #   (stage4 L552/L665/L781), which restores the paper's funnel, not just a sort.
+  enabled: true
+  # Paper §4.1's cross-encoder. The yes/no scoring template in
+  # evalgrid/systems/hypermem/reranker.py is Qwen3-Reranker's, so another
+  # family needs a new template, not just a new id here.
+  model: Qwen/Qwen3-Reranker-4B
+  # Ends in /v1, unlike upstream's config.py, which holds the server root and
+  # appends `/v1/completions` itself. Same convention as the embedding block:
+  # the client appends the route.
+  base_url: http://localhost:12810/v1
+  api_key: token
+  # Pairs per request. Score-preserving — each pair is an independent one-token
+  # completion — so this only bounds the request body. Upstream sends all ~100
+  # candidates of a layer in a single POST with no way to limit it.
+  batch_size: 32
+  timeout_seconds: 120
+  # Repo-wide no-retry policy, same as max_extraction_retries above. Upstream's
+  # provider retries twice over (a mounted urllib3 Retry(total=10) AND a
+  # 10-attempt backoff loop, ~100 sends and ~17 minutes of sleeping); this path
+  # sends once and raises LLMCallFailed. Because that is a BaseException,
+  # upstream's `except Exception` around each rerank block cannot catch it, so
+  # the silent fallback to first-stage order never fires — a dead endpoint
+  # stops the run instead of quietly producing a run that reports "reranked"
+  # for questions that were not.
+  max_retries: 1
+
+# The answer prompt. "shared" (the default, and what every run currently in
+# outputs/ used) or "native":
+#   upstream's 7-step CoT prompt (ANSWER_PROMPT_NEMORI_COT), imported
+#   verbatim from the vendored template. The answer is parsed out of
+#   `FINAL ANSWER:` as upstream's stage 5 does. answer_max_tokens: 4096
+#   below is sized for exactly this prompt.
+answer_prompt: native
+
+# Output budget for the final answer, from our generator. Upstream pins 4096 for
+# its CoT prompt, which emits seven labelled sections before the answer.
+answer_max_tokens: 4096

@@ -1,0 +1,177 @@
+# Mem0 configuration — aligned with mem0ai 0.1.118 (vendor/mem0) and the paper
+# (arXiv 2504.19413), with the deviations marked DEVIATION below.
+#
+# CLI overrides injected at runtime (Mem0Plugin.apply_mem_model):
+#   memory_llm.model    ← --mem-model
+#   memory_llm.base_url ← --mem-base-url
+#
+#   python -m evalgrid.pipeline.ingest --system mem0 --dataset longmemeval_s \
+#       --mem-model Qwen/Qwen3-30B-A3B-Instruct-2507 \
+#       --mem-base-url http://localhost:8000/v1
+#
+# The memory model is NOT needed at answer time: 0.1.x retrieval is one query
+# embedding and one dense top-k, with no LLM in the loop.
+#
+# ---------------------------------------------------------------------------
+# COST. Read this before starting a 500-sample run.
+#
+# With ingest_policy: session, one LongMemEval-S sample (~50 sessions) spends:
+#     2 LLM calls per session          fact extraction, then ADD/UPDATE/DELETE
+#                                      resolution (the 2nd is skipped when
+#                                      extraction returned no facts)
+#     1 embed + 1 dense search per extracted fact
+# ≈ 100 LLM calls per sample, ~50k across the 500-sample split. Between
+# memorybank (~50/sample) and a_mem (~500/sample); an order of magnitude below
+# hypermem. With ingest_policy: turn it is ~50x higher — do not start that run
+# without reading the note on that key below.
+# ---------------------------------------------------------------------------
+
+memory_llm:
+  api_key: token          # vllm accepts any non-empty string
+  # THE PAPER'S temperature, not the library's. arXiv 2504.19413 §3: "Where
+  # applicable, unless otherwise specified, we set the temperature to 0 to
+  # ensure the runs are as reproducible as possible" — repeated in the caption
+  # of the table carrying its headline LoCoMo numbers.
+  #
+  # BaseLlmConfig defaults to 0.1 (vendor/mem0/configs/llms/base.py:19), and
+  # this file said 0.1 until 2026-08-18 on the grounds that the default "is
+  # what the published runs used". That was wrong: the paper says otherwise in
+  # its own words, and 0.1 is simply what you get by not passing the argument.
+  # Every mem0 store built before that date was ingested at 0.1.
+  #
+  # Note what is NOT claimed: mem0 0.1.x sends no seed, so 0 buys greedy
+  # decoding, not run-to-run equality — vLLM's kernels still vary with batch
+  # size and shard count.
+  temperature: 0.0
+  # Upstream BaseLlmConfig defaults (vendor/mem0/configs/llms/base.py:21-22),
+  # and the paper is silent on both. max_tokens caps the extraction call's
+  # JSON: a truncated array fails json.loads, and upstream catches that and
+  # returns NO facts for the session, silently. Raise it before blaming the
+  # model for an empty store.
+  max_tokens: 2000
+  top_p: 0.1
+  # model and base_url injected from CLI
+
+# Only affects Mem0's NATIVE retrieval and the neighbour search that feeds the
+# update decision — the pipeline's retrieve stage ranks the flat corpus with its
+# own embedder. all-MiniLM-L6-v2 matches lightmem, a_mem and memorybank, so the
+# native paths are embedder-matched across systems.
+#
+# embedding_dims is also the Qdrant collection's vector size; the two cannot
+# disagree, so it is required rather than inferred.
+embedder:
+  provider: huggingface   # in-process SentenceTransformer, no server
+  model: sentence-transformers/all-MiniLM-L6-v2
+  embedding_dims: 384
+  # Forwarded to SentenceTransformer(model, **model_kwargs); add
+  # `model_kwargs: {device: cuda}` to keep it off the CPU on a GPU node, as
+  # lightmem's text_embedder config does. Left unset so a CPU-only box works.
+  #
+  # Set `huggingface_base_url` instead to call a TEI / vLLM embedding server
+  # rather than loading the encoder in-process.
+
+# Embedded Qdrant, local path mode — no server. The path itself is derived from
+# store_dir below; collection_name is per-process anyway because each process
+# gets its own directory.
+vector_store:
+  collection_name: mem0
+
+# Everything mem0 keeps outside the vector store lands here, under a per-PID
+# subdirectory: the SQLite history DB, MEM0_DIR (which mem0 otherwise defaults
+# to ~/.mem0 for its config, and for a SECOND local Qdrant it opens for
+# telemetry), and the store itself. Local Qdrant takes an exclusive lock on its
+# folder, so sharing these across concurrent shards is not a performance
+# question — the second process fails to start. Relative to CWD, as lightmem's
+# qdrant_data and simplemem's lancedb_data are.
+store_dir: mem0_data
+
+# --- Ingest -----------------------------------------------------------------
+
+# Which speakers reach the extractor (LongMemEval only; LoCoMo always ingests
+# both). `all` is upstream's setting: mem0ai/memory-benchmarks
+# benchmarks/longmemeval/run.py cleans each session to {role, content} and sends
+# both sides. Set `user_only` only as a labelled ablation.
+roles: all
+
+# What one add() call covers — and therefore the provenance granularity, since
+# metadata is per-call and is deepcopied onto every fact the call produces.
+#
+#   pair     UPSTREAM. One call per (user, assistant) turn-pair — literally
+#            `CHUNK_SIZE = 2  # messages per ingestion chunk (user+assistant
+#            pair)` in mem0ai/memory-benchmarks benchmarks/longmemeval/run.py.
+#            Turn-pair provenance. Under roles: user_only a "pair" is a single
+#            user turn, so this degrades to `turn`.
+#   session  one call per session. Session-level provenance, like simplemem and
+#            hypermem; ~2 LLM calls per session. Much cheaper, and what this
+#            repo defaulted to before the upstream harness was checked.
+#   turn     one call per (selected) turn. Turn-exact provenance, matching
+#            nothing upstream — keep it as an ablation only.
+#
+# Granularity is not just bookkeeping: it changes the SYSTEM. mem0 runs its
+# ADD/UPDATE/DELETE decision inside every add(), so a finer policy shows the
+# store to the resolver more often and mutates more facts. `pair` costs roughly
+# 25x the LLM calls of `session` on a ~50-turn LongMemEval-S session; use
+# --mem-variant session-ingest if the budget forces the cheap policy.
+ingest_policy: pair
+
+# infer: false stores every message verbatim, with no extraction and no
+# consolidation — i.e. Mem0 as a plain message log. It is upstream's own
+# ablation flag and the mode third-party harnesses most often benchmark by
+# accident. Leave it true; the raw-turn baseline (--system user_turns) is this
+# repo's proper "no memory system" row and costs nothing to build.
+infer: true
+
+# Which clock mem0's fact-extraction prompt runs on.
+#
+# Upstream builds FACT_RETRIEVAL_PROMPT with an f-string containing
+# datetime.now(), so every extraction prompt says "Today's date is <the day the
+# job ran>". With 0.1.x's add() taking no timestamp=, that made the wall clock
+# the extractor's only temporal anchor: it resolves "yesterday" and "last March"
+# against the ingest date, for a conversation from 2023.
+#
+# "session" points it at the session being ingested instead. This is DEVIATION 1
+# applied one layer up and for the same reason — that deviation already exists
+# because otherwise every fact in the store carries one timestamp, the afternoon
+# the job ran, and every temporal-reasoning question is asked against it. Fixing
+# that for created_at while leaving the extractor on the wall clock was just
+# stopping a layer short.
+#
+# Note what this does NOT do: it invents no date. The value is the session's own
+# timestamp, which the benchmark supplies and which _add() already writes into
+# metadata["created_at"] regardless. (An earlier version of this file pinned a
+# constant instead — that WAS a fabrication, and is why it was removed.)
+#
+# "wall" restores upstream's behaviour, under which an ingest is reproducible
+# only within a single day. Sessions with no parseable timestamp fall back to it
+# either way. Each sample's meta.json records the mode and the dates used.
+fact_extraction_clock: session
+
+# mem0 requires one of user_id/agent_id/run_id on every call. Per-sample
+# isolation here comes from the store (reset() builds a new one and the Qdrant
+# path is wiped), not from this namespace, so it is a constant.
+#
+# Do NOT name any provenance field user_id/agent_id/run_id: _build_filters_and_
+# metadata strips exactly those from caller metadata (upstream issue #6655).
+user_id: memgrid_sample
+
+# PostHog events on every init/add/search/create. MEM0_TELEMETRY=false alone
+# only disables an object that capture_event rebuilds per event — and rebuilding
+# it constructs a client and touches the telemetry vector store once per created
+# fact. This replaces the function with a no-op instead. Set false only if you
+# want upstream's exact call sequence, and expect it to fail on an offline node.
+disable_telemetry: true
+
+# --- Native retrieval -------------------------------------------------------
+# Only used by Mem0's OWN query path (benchmarks.runner phase="answer"). The
+# staged pipeline's retrieve stage ignores it and ranks the flat corpus with its
+# own retriever and top-k.
+#
+# DEVIATION: upstream's LongMemEval harness runs top_k=200, which on a store of
+# a few hundred facts is not retrieval — it is feeding back nearly everything
+# (their own top-50 and top-200 rows differ by 0.4 points). 10 is comparable
+# with the other systems' native rows here; use --mem-variant for a top-200 run
+# if you want to reproduce the shape of upstream's number.
+retrieve_k: 10
+
+# Output budget for the final answer, from our generator.
+answer_max_tokens: 2000

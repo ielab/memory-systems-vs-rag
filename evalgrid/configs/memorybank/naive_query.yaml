@@ -1,0 +1,210 @@
+# ===========================================================================
+# MemoryBank — arXiv 2305.10250 (AAAI 2024)
+#
+# THE NATIVE-PIPELINE QUERY CONFIG. Same store, published query behaviour.
+#
+# This is default.yaml with the QUERY-SIDE keys returned to what memorybank
+# published, and every INGEST-SIDE key left byte-identical. That split is the
+# whole point of the file: the stores in outputs/_memory/ were built under
+# default.yaml and are treated as fixed, so anything read at construction time
+# must not move or the config would no longer describe the store it is pointed
+# at. `diff default.yaml naive_query.yaml` should show query keys and nothing
+# else — if it ever shows an ingest key, this file is wrong.
+#
+# Use it with --config and --native-variant, NOT --mem-variant: --mem-variant
+# suffixes outputs/_memory/ and would send the run looking for a store that was
+# never built. --native-variant suffixes only the retrieval and answer dirs.
+#
+#   python -m evalgrid.pipeline.retrieve --retriever native \
+#       --exp experiments/memorybank/longmemeval.yaml \
+#       --config evalgrid/configs/memorybank/naive_query.yaml \
+#       --native-variant naive --published-depth
+#
+#   python -m evalgrid.pipeline.answer --retriever native --prompt native \
+#       --exp experiments/memorybank/longmemeval.yaml \
+#       --config evalgrid/configs/memorybank/naive_query.yaml \
+#       --native-variant naive --from-retrieval <the dir the above wrote>
+#
+# --published-depth is REQUIRED. Without it the spec's native_top_k (100)
+# overrides the published depth below and you measure the imposed one instead.
+#
+# WHAT THIS FILE STILL DOES NOT REPRODUCE:
+#   * the answer prompt. Upstream's four templates interpolate
+#     {history_summary} and a persona, both produced by summarize.personality
+#     / summarize.overall at INGEST — which is off in the stores this file is
+#     pointed at, so the templates cannot be filled even if they were ported.
+#   * the generator and judge, which stay the harness's shared pair.
+#   * answer_max_tokens: 2000 is ours; no published value exists to restore.
+# ===========================================================================
+
+# MemoryBank configuration — aligned with zhongwanjun/MemoryBank-SiliconFriend
+# (vendor/memory_bank) and the paper (arXiv:2305.10250, AAAI 2024), with the
+# deviations marked DEVIATION below.
+#
+# CLI overrides injected at runtime (MemoryBankPlugin.apply_mem_model):
+#   memory_llm.model    ← --mem-model
+#   memory_llm.base_url ← --mem-base-url
+#
+#   python -m evalgrid.pipeline.ingest --system memorybank --dataset longmemeval_s \
+#       --mem-model Qwen/Qwen3-30B-A3B-Instruct-2507 \
+#       --mem-base-url http://localhost:8000/v1
+#
+# COST: with the defaults below, one LLM call per session (the bucket summary)
+# and nothing else. The write path is a dict append and retrieval never calls a
+# model. That makes MemoryBank the cheapest constructed memory in this repo by a
+# wide margin — roughly 50 calls per LongMemEval-S sample against A-Mem's ~500
+# and HyperMem's several hundred — which is exactly what makes it useful as a
+# floor: a system that cannot beat it is not earning its extraction pipeline.
+#
+# The memory model is NOT needed at answer time.
+
+memory_llm:
+  api_key: token          # vllm accepts any non-empty string
+  # model and base_url injected from CLI
+
+# Upstream's generation config for every summarisation call
+# (summarize_memory.py:56-63), forwarded to the endpoint with three changes.
+# `n` is dropped (always 1). `stop` is dropped: its values are gpt-3.5 chat
+# markers ("<|im_end|>") plus a Chinese-path token, neither meaningful to a
+# vLLM server.
+#
+# DEVIATION: temperature is 0, not upstream's 0.7 (summarize_memory.py:57).
+# MemoryBank is the floor baseline — one LLM call per session, and that call's
+# output IS the memory unit that gets retrieved and scored. At 0.7 the same
+# session summarises differently on every ingest, so the floor moves between
+# runs and a recall delta cannot be attributed to anything. 0.7 is a companion
+# chatbot's setting; it buys phrasing variety this benchmark never reads.
+#
+# Note what stays: frequency_penalty and presence_penalty are NOT inert at
+# temperature 0 — they reshape the logits before the argmax, so upstream's
+# 0.4/0.2 still shape the summaries. Only top_p goes dead (vLLM ignores the
+# nucleus cutoff under greedy decoding), and it was 1.0 anyway.
+#
+# Set back to 0.7 to reproduce upstream verbatim.
+#
+# DEVIATION: max_tokens is 1024, not upstream's 400. At 400 the smoke run
+# (outputs/_trace_smoke) stopped 34/45 and 38/53 summaries at exactly the cap —
+# ~75% of every sample's memory ended mid-word ("...a **lav", "...symbol").
+# Upstream's own dataset is short synthetic dialogue where 400 is ample;
+# a LongMemEval-S session is ~10k characters, and the summaries that DID finish
+# used 228-335 tokens, so the cap was binding on the long tail rather than
+# describing the task. A floor baseline has to be a floor for the right reason
+# — one LLM call per session — not because its summaries were clipped. Set this
+# back to 400 to reproduce upstream verbatim; meta.json's truncated_summaries
+# reports what the cap cost either way.
+summary_params:
+  temperature: 0
+  max_tokens: 1024
+  top_p: 1.0
+  frequency_penalty: 0.4
+  presence_penalty: 0.2
+
+# --- Ingest -----------------------------------------------------------------
+
+# Which speakers reach the store (LongMemEval only; LoCoMo always ingests both).
+# `all` is the only setting faithful to MemoryBank: its unit IS a
+# {query, response} exchange, and user_only empties the response side, leaving a
+# user turn with a date prefix. Its own synthetic dataset is always both sides.
+# Set `user_only` only as a labelled ablation, and expect it to hurt this system
+# more than any other here.
+roles: all
+
+# What a memory bucket is — the summary granularity, the unit id prefix, and
+# (when forgetting is on) the decay clock.
+#
+# DEVIATION (default): upstream's only bucket key is `time.strftime("%Y-%m-%d")`
+# — the wall-clock date of the RUN, not any date in the data — so every sample
+# would be stamped with the day the job ran. `session` keys by session_id: one
+# session = one summary, stable unit ids, no same-date collisions (LongMemEval
+# puts 50+ sessions across far fewer distinct dates). `date` restores date
+# buckets, using each session's own date rather than today's.
+bucket_by: session
+
+# The summarisation pass, run once at the last session (upstream's explicit
+# offline batch job). Each flag costs LLM calls:
+#   events       1 per bucket — the second corpus granularity. This is the tier
+#                that matters for retrieval; leave it on.
+#   personality  1 per bucket. A persona/emotion analysis with a response
+#                strategy, written for a companion agent. It is not retrievable
+#                (it never becomes a corpus unit) and carries no factual signal,
+#                so it is off by default; turn it on only to reproduce the full
+#                pipeline.
+#   overall      2 per sample. `overall_personality` is the only global string
+#                upstream injects into a prompt, and `overall_history` is DEAD
+#                CODE — computed by its own LLM call and interpolated into none
+#                of the four answer templates. Both are recomputed from scratch
+#                over the whole history, so the prompt grows without bound;
+#                at LongMemEval-M scale it needs hierarchical folding.
+#                Off by default.
+# With all three off, MemoryBank makes zero LLM calls and the store is raw
+# turn-pairs — a legitimate configuration (see MemoryBankPlugin.apply_mem_model).
+summarize:
+  events: true
+  personality: false
+  overall: false
+
+# The Ebbinghaus forgetting mechanism — the paper's headline contribution.
+#
+# DEVIATION, three ways, all deliberate:
+#   * OFF by default. Upstream runs it at index-build time, pops turns out of
+#     the dict and rewrites the source JSON. On LongMemEval the answer lives in
+#     exactly one session and question dates are weeks after the evidence, so
+#     enabling it destroys recall irreversibly.
+#   * NON-DESTRUCTIVE when on: units are flagged `forgotten` and skipped by the
+#     corpus builder, never deleted, so the same store can be re-flattened with
+#     forgetting off and the two corpora diffed.
+#   * SEEDED. Upstream calls a bare random.random().
+#
+# curve: which retention function to use, because the code does not implement
+# its own paper.
+#   paper  R = e^(-t/S)     arXiv:2305.10250 §Method — strength slows forgetting
+#   code   R = e^(-t*S/5)   what forget_memory.py:36 computes: written
+#                           `math.exp(-t / 5*S)`, which Python parses as
+#                           exp((-t/5)*S). The exponent is inverted, so strength
+#                           SPEEDS UP forgetting and recalling a memory makes it
+#                           more likely to be deleted.
+# Whichever you pick, say which one in the writeup — they are different systems.
+# Also note the scale: with S=1 and t=60 days the paper's curve retains 8e-27.
+# The mechanism is calibrated for a 10-day companion setting and does not
+# transfer to a months-long haystack without retuning S.
+forget:
+  enabled: false
+  curve: paper
+  seed: 0
+
+# --- Native retrieval -------------------------------------------------------
+# Only used by MemoryBank's OWN query path (benchmarks.runner phase="answer").
+# The staged pipeline's retrieve stage ignores it and ranks the flat corpus with
+# its own retriever and top-k.
+
+# MemoryBank's EN default (`all-MiniLM-L6-v2`), loaded through this repo's
+# factory. Exact cosine over a few hundred units, so no FAISS: langchain 0.0.146
+# cannot be imported on a current Python anyway, and an ANN index over a corpus
+# this size is slower than the scan it approximates.
+embedder:
+  model: sentence-transformers/all-MiniLM-L6-v2
+
+# Upstream's VECTOR_SEARCH_TOP_K (6 in forget_memory.py, 3 in local_doc_qa.py —
+# the two files disagree; 6 is what the demos run).
+retrieve_k: 6
+
+# Upstream bumps memory_strength on every retrieved unit and rewrites the whole
+# memory JSON per query, so answering mutates the memory being evaluated and two
+# retriever configs would see different stores. Implemented here in memory only,
+# and off: turn it on only when studying the recall-feedback loop itself.
+# NAIVE: upstream bumps memory_strength on every retrieved unit. NOTE: answering
+#   now MUTATES the store, so this store is valid for ONE native run only —
+#   never sweep a second retriever config over it.
+update_on_recall: true
+
+# MemoryBank keeps the SHARED answer prompt, and this is not a gap we can
+# close. Upstream's four templates are AI-companion / psychological-
+# counsellor personas living in utils/prompt_utils.py, which is NOT vendored;
+# their {history_summary} slot is dead upstream (overall_history is computed
+# by its own LLM call and interpolated into no template); and the persona
+# they need comes from summarize.personality/overall, which are off in the
+# stores this file is pointed at. So there is no `answer_prompt: native`
+# for this system — the adapter has no such branch and would ignore the key.
+
+# Output budget for the final answer, from our generator.
+answer_max_tokens: 2000

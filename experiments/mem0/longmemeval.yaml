@@ -1,0 +1,155 @@
+# Mem0 v0.1.118 on LongMemEval-S, default config.
+#
+#   python -m evalgrid.pipeline.ingest           --exp experiments/mem0/longmemeval.yaml --mem-base-url http://localhost:8000/v1
+#   python -m evalgrid.pipeline.qrels_has_answer --exp experiments/mem0/longmemeval.yaml
+#   SPEC=experiments/mem0/longmemeval.yaml bash experiments/run_all_retrieval.sh
+#   SPEC=experiments/mem0/longmemeval.yaml bash experiments/run_all_answers.sh
+#   SPEC=experiments/mem0/longmemeval.yaml bash experiments/run_all_judge.sh
+#
+# WHAT THIS ROW IS FOR. Mem0 is the only system here that consolidates ONLINE:
+# every add() re-reads the neighbours of each new fact and has an LLM decide
+# ADD / UPDATE / DELETE / NONE against them. LightMem does the same work as one
+# deferred offline sweep, MemoryBank and SimpleMem do not do it at all. Under an
+# identical corpus, retriever and prompt, this row is what isolates that choice.
+#
+# READ THIS BEFORE REPORTING A NUMBER FROM THIS SPEC.
+#
+# 1. IT IS NOT A REPRODUCTION OF A PUBLISHED NUMBER, and cannot be made into
+#    one. Every Mem0 LongMemEval figure (94.4 / 94.8 %) is the HOSTED PLATFORM;
+#    the best OSS row, 91.0 %, still runs through their REST server and passes a
+#    per-session `timestamp=` the OSS library does not accept. All of them use
+#    top_k = 200 on a store of a few hundred facts — their own top-50 and
+#    top-200 differ by 0.4 points, which is what a retriever doing nothing looks
+#    like. Do not put 94.4 in the same table as this row.
+#
+# 2. The version IS the claim. This is 0.1.118, the last release of the 0.1
+#    line and the last implementation of the paper's two-call design. `pip
+#    install mem0ai` today gives 2.x: one additive-extraction call, md5 dedup
+#    instead of an LLM decision, hybrid retrieval, no graph. Write "Mem0
+#    v0.1.118" in every table; "Mem0" alone is ambiguous between two systems.
+#
+# 3. Ingest is LOSSY AND ORDER-DEPENDENT. UPDATE overwrites a fact's text and
+#    DELETE soft-deletes it, both from a non-deterministic LLM call that sees
+#    only the top-5 neighbours. Re-ingesting the same sessions in the same order
+#    does not reproduce a byte-identical store — so the snapshot is the artifact,
+#    and a re-ingest with --overwrite is a NEW experiment, not a repeat of this
+#    one. The complete mutation log ships beside it in history.db.
+#
+# 4. Gold granularity is SESSION-level (ingest_policy: session), like simplemem
+#    and hypermem, coarser than lightmem's and a_mem's per-turn provenance. A
+#    fact UPDATE'd across sessions carries the union of its sources, so its
+#    has_answer is the OR — a deviation from upstream, which drops custom
+#    metadata on UPDATE entirely and would mislabel exactly the knowledge-update
+#    questions. Split retrieval metrics by granularity before comparing across
+#    systems, or use an LLM labeler.
+#
+# 5. Mem0^g (the graph variant) is NOT this row and is not implemented. If a
+#    Its unit is a graph edge, it needs a live Neo4j, and it has no file-based
+#    persistence to snapshot — for a reported +0 to +2 points.
+
+system: mem0
+dataset: longmemeval_s
+mem_model: Qwen/Qwen3-30B-A3B-Instruct-2507
+labeler_model: has_answer
+candidate_source: sweep   # keep plain "has_answer" segment (no "-retrieval" suffix)
+
+# Answer/judge models — part of the experiment (they key the answer output path).
+# Keep judge != gen to avoid self-grading bias.
+gen_model: Qwen/Qwen3-30B-A3B-Instruct-2507
+judge_model: gpt-4o-mini
+
+# THE RETRIEVER GRID — eight settings, identical on every system spec, so a cell
+# of the table means the same thing in every row. Entry
+# format matches the retrieve --retriever* flags and --native-retriever alike:
+# bm25 | sparse:MODEL | dense:MODEL[@http://host/v1] | rrf:MODEL[@url] (BM25 +
+# dense fused by reciprocal rank fusion). The @localhost entries need a vllm
+# embedding server on the matching port (:8001, :8002 — see README "vllm");
+# bm25, SPLADE-v3 and MiniLM load in-process.
+#
+# `retrievers:` ranks corpus.jsonl with no system loaded — the CONTROL.
+# `native_retrievers:` installs the same ranker INSIDE Mem0's own loop — the
+# SETTING. One string names the same retriever on both sides, so the pair of run
+# dirs differs by the `native-` prefix and nothing else.
+#
+# The MiniLM rows are the encoder this repo configures Mem0 with, and 0.1.x
+# retrieval has no post-ranking step, so flat-MiniLM vs native-MiniLM is a
+# second no-op check alongside LightMem's. (Upstream's own runs use
+# text-embedding-3-small; see configs/mem0/default.yaml for why not here.)
+#
+# This spec previously carried NO retrievers: key at all, which made
+# `SPEC=... bash experiments/run_all_retrieval.sh` a silent no-op — the driver
+# read an empty list and looped zero times.
+retrievers:
+  # --- sparse ---
+  - bm25
+  - sparse:naver/splade-v3
+  # --- dense ---
+  - dense:sentence-transformers/all-MiniLM-L6-v2          # the encoder configs/mem0/default.yaml sets
+  - dense:Qwen/Qwen3-Embedding-0.6B@http://localhost:8001/v1
+  - dense:Qwen/Qwen3-Embedding-4B@http://localhost:8002/v1
+  # --- fusion: BM25 + dense, reciprocal rank fusion (rrf_k=60) ---
+  - rrf:sentence-transformers/all-MiniLM-L6-v2
+  - rrf:Qwen/Qwen3-Embedding-0.6B@http://localhost:8001/v1
+  - rrf:Qwen/Qwen3-Embedding-4B@http://localhost:8002/v1
+
+# The same eight, inside Mem0's own query loop.
+native_retrievers:
+  # --- sparse ---
+  - bm25
+  - sparse:naver/splade-v3
+  # --- dense ---
+  - dense:sentence-transformers/all-MiniLM-L6-v2          # the encoder configs/mem0/default.yaml sets
+  - dense:Qwen/Qwen3-Embedding-0.6B@http://localhost:8001/v1
+  - dense:Qwen/Qwen3-Embedding-4B@http://localhost:8002/v1
+  # --- fusion: BM25 + dense, reciprocal rank fusion (rrf_k=60) ---
+  - rrf:sentence-transformers/all-MiniLM-L6-v2
+  - rrf:Qwen/Qwen3-Embedding-0.6B@http://localhost:8001/v1
+  - rrf:Qwen/Qwen3-Embedding-4B@http://localhost:8002/v1
+
+# --- Native path: the imposed retrieval depth -------------------------------
+# Read ONLY by the two stages that run Mem0's own loop
+# (pipeline/retrieve._run_native and pipeline/answer._run_native, live runs).
+# The flat sweep and the shared-prompt answer path ignore it — their depth is
+# the `--top-k` axis every system is compared on, default 10.
+#
+#   python -m evalgrid.pipeline.retrieve --retriever native \
+#       --exp experiments/mem0/longmemeval.yaml
+#   python -m evalgrid.pipeline.answer --retriever native --prompt native \
+#       --exp experiments/mem0/longmemeval.yaml \
+#       --from-retrieval <the dir above> --top-k 5    # or --context-budget 500
+#
+# WHY IT IS NOT SPELLED `top_k`. --top-k means two different things. On the
+# native path it is RETRIEVAL depth — retriever identity, pushed into the
+# system's own retriever before it runs, and keyed into the run directory as a
+# `-top330` segment (lib/paths.native_segment), so this condition can never
+# overwrite the published-depth control. On the shared path it is PROMPT depth,
+# the axis every system is compared on. One spec drives both halves of a sweep,
+# so the two cannot share a key: a `top_k: 330` here would silently move the
+# shared comparison from top10 to top330.
+#
+# NOT APPLIED ON A REPLAY (--from-retrieval). There --top-k is a cut over units
+# already retrieved — an answer-side axis that gets swept — so it comes from the
+# CLI or not at all.
+#
+# `--published-depth` OPTS OUT, and that is how the published-depth control runs
+# off this same spec: it retrieves at the depth in the system's own config and
+# its directory carries no `-top<k>`. scripts/query.sh passes it
+# whenever NATIVE_TOP_K is empty.
+#
+# The depth belongs in this spec rather than in evalgrid/configs/mem0/default.yaml
+# because a knob set there changes the ranking while leaving the run in the same
+# directory as the setting before it.
+#
+# 330: 1.0 units/k and 24 tokens/k, measured from outputs/_smoke2_retrieval on
+# 2026-08-15 — ~2x headroom on both answer axes (top-50 memories, a 4000-token
+# budget), with tokens the binding one for Mem0. Its facts are the smallest
+# units in the grid, which is why it needs the deepest k to reach a budget the
+# other systems reach in tens of units.
+#
+# This is the depth that makes a budget cell measurable at all for Mem0: at its
+# published depth of 10 the whole ranking was ~200 tokens on that sample, so a
+# --context-budget 500 run could not fill the budget even by taking all of it,
+# and the cell came back context_underfilled.
+#
+# Depth for Mem0's OWN retriever (config key `retrieve_k`).
+native_top_k: 330

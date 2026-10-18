@@ -1,0 +1,175 @@
+# HyperMem on LongMemEval-S, default config.
+#
+#   python -m evalgrid.pipeline.ingest           --exp experiments/hypermem/longmemeval.yaml --mem-base-url http://localhost:8000/v1
+#   python -m evalgrid.pipeline.qrels_has_answer --exp experiments/hypermem/longmemeval.yaml
+#   SPEC=experiments/hypermem/longmemeval.yaml bash experiments/run_all_retrieval.sh
+#   SPEC=experiments/hypermem/longmemeval.yaml bash experiments/run_all_answers.sh
+#   SPEC=experiments/hypermem/longmemeval.yaml bash experiments/run_all_judge.sh
+#
+# READ THIS BEFORE REPORTING A NUMBER FROM THIS SPEC.
+#
+# 1. INGEST IS EXPENSIVE — a few hundred LLM calls per sample, so a few hundred
+#    thousand for the benchmark. The cost formula is in
+#    evalgrid/configs/hypermem/default.yaml. Shard it (--num-shards) and check
+#    outputs/_memory/hypermem/.../ingest_usage.json after the first few samples
+#    before committing to the full run.
+#
+# 2. The corpus mixes two granularities. Facts (atomic, self-contained,
+#    prompt-enforced) and episodes (per-session narrative summaries) both become
+#    units — that is what upstream's default answer context contains, so the
+#    flat-corpus run swaps only the retriever. Set corpus_levels: facts in the
+#    config for a facts-only corpus; it writes to the same memory dir, so use
+#    --mem-variant if you want both.
+#
+# 3. The qrels are COARSER than for lightmem or a_mem, and the same granularity
+#    as simplemem's. An episode is exactly one session; a fact inherits
+#    has_answer from the episodes it was extracted from. So relevance here is
+#    session-level, which is what LongMemEval's own answer_session_ids ships,
+#    but not the turn-level flag LightMem and A-Mem can produce. Compare against
+#    simplemem freely; for cross-system tables run the LLM labeler instead.
+#    candidate_source=sweep keeps the labeler segment as plain "has_answer".
+#
+# 4. Most of what HyperMem is credited for IS the retriever, more so than for
+#    any other system here. Its hyperedges contribute exactly one thing at query
+#    time — restricting layer 2 to the episodes under the top-k topics and layer
+#    3 to the facts under those episodes. Weights and roles are not fused into
+#    any score (upstream's own comments say so). So a flat BM25/dense run over
+#    the same facts searches a STRICT SUPERSET of HyperMem's candidate pool, and
+#    the delta measures whether topic-gated pruning helps or hurts. That is a
+#    genuine ablation and the most interesting thing this row can say — but it
+#    is not a reproduction of the paper, which reports LoCoMo only (92.73
+#    overall, gpt-4o-mini judge, 3-round majority vote) and no LongMemEval
+#    numbers at all.
+#
+# 5. What the flat corpus additionally loses: the hypergraph embedding
+#    propagation (dense vectors contextualised by neighbours), which no sparse
+#    retriever can express; and the token-repetition field weighting in
+#    upstream's BM25 corpus (fact content ×3, query_patterns ×2), which is an
+#    advantage the native path has over our plain-text BM25.
+
+system: hypermem
+dataset: longmemeval_s
+mem_model: Qwen/Qwen3-30B-A3B-Instruct-2507
+labeler_model: has_answer
+candidate_source: sweep   # keep plain "has_answer" segment (no "-retrieval" suffix)
+
+# Answer/judge models — part of the experiment (they key the answer output path).
+# Keep judge != gen to avoid self-grading bias.
+gen_model: Qwen/Qwen3-30B-A3B-Instruct-2507
+judge_model: gpt-4o-mini
+
+# THE RETRIEVER GRID — eight settings, identical on every system spec, so a cell
+# of the table means the same thing in every row. Entry
+# format matches the retrieve --retriever* flags and --native-retriever alike:
+# bm25 | sparse:MODEL | dense:MODEL[@http://host/v1] | rrf:MODEL[@url] (BM25 +
+# dense fused by reciprocal rank fusion). The @localhost entries need a vllm
+# embedding server on the matching port (:8001, :8002 — see README "vllm");
+# bm25, SPLADE-v3 and MiniLM load in-process.
+#
+# `retrievers:` ranks corpus.jsonl with no system loaded — the CONTROL.
+# `native_retrievers:` installs the same ranker INSIDE HyperMem's own loop — the
+# SETTING. One string names the same retriever on both sides, so the pair of run
+# dirs differs by the `native-` prefix and nothing else.
+#
+# No row here is HyperMem's own encoder: its dense leg is Qwen3-Embedding-4B
+# with hyperedge propagation, which the flat path cannot express (plain
+# sentence embeddings carry none of stage 3's propagation). The 4B rows are the
+# closest available, and the contrast between our `rrf:Qwen3-4B` and HyperMem's
+# own rrf is the most informative cell it has — same operator, different dense
+# representation.
+retrievers:
+  # --- sparse ---
+  - bm25
+  - sparse:naver/splade-v3
+  # --- dense ---
+  - dense:sentence-transformers/all-MiniLM-L6-v2
+  - dense:Qwen/Qwen3-Embedding-0.6B@http://localhost:8001/v1
+  - dense:Qwen/Qwen3-Embedding-4B@http://localhost:8002/v1
+  # --- fusion: BM25 + dense, reciprocal rank fusion (rrf_k=60) ---
+  - rrf:sentence-transformers/all-MiniLM-L6-v2
+  - rrf:Qwen/Qwen3-Embedding-0.6B@http://localhost:8001/v1
+  - rrf:Qwen/Qwen3-Embedding-4B@http://localhost:8002/v1
+
+# The same eight, inside HyperMem's own query loop.
+#
+# EVERY native row needs `--config evalgrid/configs/hypermem/grid.yaml`
+# (`retrieval_type: keyword`): the swap replaces `search_with_bm25`, the
+# function only the keyword branch calls, and check_supported REFUSES the swap
+# under `rrf` — where the substitute would be RRF-fused with the propagated
+# dense leg it is meant to replace (§4d).
+native_retrievers:
+  # --- sparse ---
+  - bm25
+  - sparse:naver/splade-v3
+  # --- dense ---
+  - dense:sentence-transformers/all-MiniLM-L6-v2
+  - dense:Qwen/Qwen3-Embedding-0.6B@http://localhost:8001/v1
+  - dense:Qwen/Qwen3-Embedding-4B@http://localhost:8002/v1
+  # --- fusion: BM25 + dense, reciprocal rank fusion (rrf_k=60) ---
+  - rrf:sentence-transformers/all-MiniLM-L6-v2
+  - rrf:Qwen/Qwen3-Embedding-0.6B@http://localhost:8001/v1
+  - rrf:Qwen/Qwen3-Embedding-4B@http://localhost:8002/v1
+
+# --- Native path: the imposed retrieval depth -------------------------------
+# Read ONLY by the two stages that run HyperMem's own loop
+# (pipeline/retrieve._run_native and pipeline/answer._run_native, live runs).
+# The flat sweep and the shared-prompt answer path ignore it — their depth is
+# the `--top-k` axis every system is compared on, default 10.
+#
+#   python -m evalgrid.pipeline.retrieve --retriever native \
+#       --exp experiments/hypermem/longmemeval.yaml
+#   python -m evalgrid.pipeline.answer --retriever native --prompt native \
+#       --exp experiments/hypermem/longmemeval.yaml \
+#       --from-retrieval <the dir above> --top-k 5    # or --context-budget 500
+#
+# WHY IT IS NOT SPELLED `top_k`. --top-k means two different things. On the
+# native path it is RETRIEVAL depth — retriever identity, pushed into the
+# system's own retriever before it runs, and keyed into the run directory as a
+# `-top95` segment (lib/paths.native_segment), so this condition can never
+# overwrite the published-depth control. On the shared path it is PROMPT depth,
+# the axis every system is compared on. One spec drives both halves of a sweep,
+# so the two cannot share a key: a `top_k: 95` here would silently move the
+# shared comparison from top10 to top95.
+#
+# NOT APPLIED ON A REPLAY (--from-retrieval). There --top-k is a cut over units
+# already retrieved — an answer-side axis that gets swept — so it comes from the
+# CLI or not at all.
+#
+# `--published-depth` OPTS OUT, and that is how the published-depth control runs
+# off this same spec: it retrieves at the depth in the system's own config and
+# its directory carries no `-top<k>`. scripts/query.sh passes it
+# whenever NATIVE_TOP_K is empty.
+#
+# The depth belongs in this spec rather than in evalgrid/configs/hypermem/default.yaml
+# because a knob set there changes the ranking while leaving the run in the same
+# directory as the setting before it.
+#
+# 95: 2.1 units/k and 82 tokens/k, measured from outputs/_smoke2_retrieval on
+# 2026-08-15 — ~2x headroom on both answer axes (top-50 memories, a 4000-token
+# budget), with tokens the binding one for HyperMem.
+#
+# READ THIS BEFORE REPORTING A top95 ROW. With the cross-encoder off
+# (`reranker.enabled: false`, our development notes), `initial_candidates` is
+# not read at all and each layer ranks its whole doc set — so at fact_top_k 95
+# the funnel keeps 95 facts and has almost nothing left to filter: this
+# condition is close to raw rrf over the fact level, which is NOT what
+# HyperMem's contribution is. The published-depth control (30 facts / 10
+# episodes / 10 topics, paper §4.1) is where the coarse-to-fine filter is
+# actually doing work. Report the two side by side.
+#
+# No --mem-base-url on the native path: nothing in HyperMem's funnel prompts the
+# memory model. It is not model-free though — the config ranks with rrf, so the
+# embedder must be served first:
+#
+#   vllm serve Qwen/Qwen3-Embedding-4B --task embed --port 11810
+#
+# scripts/query.sh does not start it (it manages one endpoint). The
+# adapter raises rather than silently falling back to BM25.
+#
+# Depth for HyperMem's OWN retriever. It has no single k: HyperMemPlugin
+# .apply_retrieval_budget sets the FACT level to this number and scales the
+# coarser levels with it (episodes and topics at 1/3 each), preserving the
+# funnel's shape — pinning all three to one value would starve the filter and
+# measure the starvation. `initial_candidates` is left alone, and with the
+# cross-encoder off it is not read at all (stage4 L552/L665/L781).
+native_top_k: 95
