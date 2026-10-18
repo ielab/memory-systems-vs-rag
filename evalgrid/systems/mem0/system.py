@@ -95,7 +95,7 @@ def _extracted_nothing(choices: list) -> bool:
     nothing from. Anything unparseable is NOT counted: upstream also ends up
     with no facts there, but that is a JSON failure rather than an extractor
     that read the turn and found nothing worth keeping, and conflating the two
-    is what §18 is about. A clipped reply is already counted as
+    overstated the failure count. A clipped reply is already counted as
     ``truncated_calls``.
     """
     if not choices:
@@ -385,8 +385,8 @@ class Mem0Base(MemorySystem):
         # when facts WERE extracted and the resolution call answered NONE to
         # every one of them. Until 2026-08-19 one counter named
         # "empty_extractions" carried both, so 167 of 58bf7951's 311 add()s
-        # were reported as failed extractions when only 138 were (our development notes
-        # §18) — a 21% overstatement of a degradation counter check_ingest
+        # were reported as failed extractions when only 138 were
+        # — a 21% overstatement of a degradation counter check_ingest
         # gates on.
         self.empty_extractions = 0
         self.no_op_adds = 0
@@ -865,7 +865,7 @@ class Mem0Base(MemorySystem):
                 # Nonzero means the store is quietly incomplete: check_ingest
                 # reads "truncated_calls" as a shared degradation counter, and
                 # the split says which half was lost. Read the completion before
-                # raising memory_llm.max_tokens — see our development notes, where
+                # raising memory_llm.max_tokens: in our runs
                 # every truncation in a_mem/hypermem/simplemem was a repetition
                 # loop and mem0's were the only genuinely long replies.
                 "truncated_calls": self.truncated_calls,
@@ -875,7 +875,7 @@ class Mem0Base(MemorySystem):
                 # saw. Under "wall" this is one date — whatever day the job ran
                 # — and the store is only reproducible within that day; under
                 # "session" it is the sample's own session dates. See
-                # _set_extraction_clock / our development notes: self.fact_extraction_clock,
+                # _set_extraction_clock and self.fact_extraction_clock.
                 "extraction_dates": sorted(self._extraction_dates) or [
                     datetime.now().strftime("%Y-%m-%d")],
                 # How the extraction calls were decoded. Nothing else on disk

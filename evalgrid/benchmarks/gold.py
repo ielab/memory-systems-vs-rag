@@ -21,9 +21,8 @@ The levels, widest last:
            gold at all.
   turn     strict, PLUS every turn of an evidence session that flags nothing.
            strict is silent about 94 of longmemeval_s's 948 evidence sessions —
-           listed in ``answer_session_ids``, no turn inside marked — which
-           our development notes document as the annotation
-           gap and recommends reporting a sensitivity check against. This level
+           listed in ``answer_session_ids``, no turn inside marked — an
+           annotation gap that calls for a sensitivity check. This level
            IS that check, as a gold set. 45 of the 94 (529 turns) sit in 32
            non-abstention multi-hop questions whose other hops ARE flagged, so
            a strict oracle answers those with a hop missing; the other 49 sit in
@@ -54,7 +53,7 @@ vs 62.1%). The apparent gain is text volume, not evidence. Widening an upper
 bound with text indistinguishable from random adjacent text does not raise the
 bound, it just stops it being one — and on ``user_turns`` it would have
 manufactured gold for the 51 questions that corpus provably cannot answer,
-defeating a ceiling §3 of that document establishes on purpose.
+defeating a ceiling that corpus is meant to set.
 
 An evidence session is one named in ``Query.evidence_session_ids`` OR one
 holding a flagged turn. The union, not either alone: LongMemEval populates the
@@ -125,7 +124,7 @@ STAMPED_GOLD_LEVEL = "strict"
 #:
 #: "turn" repairs exactly those cases — an evidence session that flags nothing
 #: contributes all of itself — and is otherwise identical to strict, unit for
-#: unit. It is the sensitivity check §7 of that document recommends, promoted to
+#: unit. It is the annotation-gap sensitivity check, promoted to
 #: the default because the thing it corrects is an annotation gap, not a
 #: property of any system under test.
 #:
@@ -251,8 +250,7 @@ def query_evidence_turn_ids(sample: Sample, query: Query) -> set[str] | None:
     turn (LoCoMo's ``dia_id``, BEAM's ``source_chat_ids`` message id) — into the
     ``<session_id>:t<i>`` namespace everything downstream compares on. An id
     that resolves to no turn is DROPPED rather than raising: BEAM's evidence
-    dangles on 0.6% of ids at 128K and ~3% at 500K/1M (dataset_analysis/beam.md
-    §4), which is a property of the release, not a reason to lose the sample.
+    dangles on 0.6% of ids at 128K and ~3% at 500K/1M, which is a property of the release, not a reason to lose the sample.
 
     Returns None, not an empty set, when this sample carries no per-question
     evidence at all — the two are different questions. None means "fall back to

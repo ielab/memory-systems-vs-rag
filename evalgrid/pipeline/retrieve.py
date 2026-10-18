@@ -29,8 +29,7 @@ Writes
   field names. `tokens`/`llm_calls` are LLM-only on BOTH halves: a flat
   retriever calls no generator, so its zero there is structural, and what it
   actually spent is the `encode` block — texts, tokens and batches through the
-  encoder, which nothing counted before. See our development notes for the two
-  fields that do not mean the same thing across the halves.
+  encoder, which nothing counted before.
 (labeler-segment is <labeler-model>, plus a "-retrieval" suffix when --candidate-source retrieval)
 
 The same qrels dataset can be retrieved by any number of retrievers — each

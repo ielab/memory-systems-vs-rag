@@ -38,8 +38,8 @@
 # groups below serve no request and are skipped.
 #
 # THE E1 ROW — the system's own retrieval, no swap. GRID_RETRIEVERS=native is
-# one unswapped cell, and it is what the two answering budgets of
-# our development notes are measured on:
+# one unswapped cell, and it is what the two answering budgets
+# (top-k and tokens) are measured on:
 #
 #   STAGE=answer GRID_RETRIEVERS=native ANSWER_CELLS=top3+top5+top10+top20 ...
 #
@@ -405,8 +405,8 @@ if (( MEM_LLM )); then
     #   * it is the SAME window the raw-turn baselines are served at
     #     (LONG_CTX_SYSTEMS), so a memory-system row and a full-context row are
     #     generated under identical serving conditions;
-    #   * --context-window is passed as the same number, so the guard of
-    #     our development notes means one thing across every row of the table;
+    #   * --context-window is passed as the same number, so the context-window
+    #     guard means one thing across every row of the table;
     #   * nothing here is close to binding — a top20 or budget1000 prompt is
     #     ~1k tokens, and hypermem's uncut block ~9k — which is what makes an
     #     over-generous window free rather than wasteful.

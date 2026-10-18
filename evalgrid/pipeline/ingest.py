@@ -355,8 +355,7 @@ def main():
     # The body, not just its hash. A fingerprint proves two stores differ; it
     # cannot say HOW, and a hash cannot be run backwards — when three smoke4
     # stores turned out to have been built at temperature 0.7, recovering that
-    # meant bisecting git history for a config whose hash matched (our development notes,
-    # "three stores ingested at the wrong temperature"). It is a few KB beside a
+    # meant bisecting git history for a config whose hash matched. It is a few KB beside a
     # store measured in MB, and it makes a store self-describing: post-hoc,
     # `jq .config_resolved.memory_llm` answers what the run actually decoded
     # under. mem0's meta.json["sampling"] was the per-system version of this;

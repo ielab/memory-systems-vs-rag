@@ -366,10 +366,11 @@ def main() -> int:
           sm.records_has_answer(sm_legacy), False)
     check("simplemem iter_units on empty dir",
           list(sm.iter_units(os.path.join(tmp, "nope"))), [])
-    # One config, deliberately: the windowing variants were folded into
-    # default.yaml so that "SimpleMem" names one system rather than three.
+    # default.yaml builds the store; naive_query.yaml adds the published
+    # query-time settings for RQ1. No other windowing variants.
     check("simplemem config files exist",
-          sorted(os.listdir(os.path.dirname(sm.config_path()))), ["default.yaml"])
+          sorted(os.listdir(os.path.dirname(sm.config_path()))),
+          ["default.yaml", "naive_query.yaml"])
 
     # Window loop + provenance. SimpleMemBase imports nothing from
     # vendor/simplemem at module scope, so the windowing can be exercised with
@@ -1133,7 +1134,7 @@ def main() -> int:
     def _new_lightmem_stub():
         """A LightMemLongMemEval with the real constructor skipped.
 
-        The four attributes below are the ingest-path state the constructor
+        The attributes below are the ingest-path state the constructor
         would have set: the held add_memory call (see
         LightMemSystem.queue_add_memory) and the two turn ledgers — turns that
         never reached the model (dropped_turns) and turns that did
@@ -1142,9 +1143,11 @@ def main() -> int:
         """
         sys_ = object.__new__(LightMemLongMemEval)
         sys_._lightmem = _CapturingLightMem()
+        sys_._config = None  # no messages_use set -> both roles are sent
         sys_._pending = None
         sys_.dropped_turns = 0
         sys_.ingested_turn_ids = set()
+        sys_.addressable_turn_ids = set()
         return sys_
 
     def _ingest_ids(turns):
@@ -1164,7 +1167,7 @@ def main() -> int:
     check("lightmem stamps synthesised turn ids on both sides of each pair",
           ids, [["s1:t0", "s1:t1"], ["s1:t2", "s1:t3"]])
     check("they are the ids qrels_turns builds, so units join to raw turns",
-          ids[1], [_qrels_turn_id(sess, 2), _qrels_turn_id(sess, 3)])
+          ids[1], [_qrels_turn_id(sess.session_id, 2), _qrels_turn_id(sess.session_id, 3)])
 
     # The subtle one: a session opening with an assistant turn is skipped into,
     # so the first PAIR is not turn 0. Indexing a slice (what this did before)

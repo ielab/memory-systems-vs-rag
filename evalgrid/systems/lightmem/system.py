@@ -275,7 +275,7 @@ class LightMemSystem(MemorySystem):
         self.ingested_turn_ids: set[str] = set()
         # The subset of the above whose role ``messages_use`` actually sends.
         # turns_without_memory is measured against THIS, not against
-        # ingested_turn_ids — see save_memory and our development notes
+        # ingested_turn_ids — see save_memory.
         self.addressable_turn_ids: set[str] = set()
         # fact text -> {"turn_ids": set, "has_answer": bool}, filled at
         # extraction time. See _capture_provenance and save_memory.
@@ -564,7 +564,7 @@ class LightMemSystem(MemorySystem):
         counters), and also the one whose pipeline is mostly NOT LLM calls —
         pre-compression, segmentation and slicing are local compute. So this is
         L1 and L2 in the same place, wrapping the four vendored methods that
-        §10.1b identified as the real stage boundaries:
+        are the real stage boundaries:
 
         =================================  ========  =================================
         method                             stage     what it is
@@ -832,8 +832,8 @@ class LightMemSystem(MemorySystem):
                 "truncated_calls": self._truncated_this_sample(),
                 # Turns that never reached an add_memory call at all — the
                 # leading non-user run, the odd tail, the mis-aligned pairs the
-                # role check rejects. Upstream's behaviour, kept deliberately
-                # (our development notes"), but invisible until now: this is the
+                # role check rejects. Upstream's behaviour, kept deliberately,
+                # but invisible until now: this is the
                 # one system whose ingest can drop input, and a store built from
                 # 8 of 10 turns looked identical to one built from all 10.
                 "dropped_turns": self.dropped_turns,
@@ -848,8 +848,8 @@ class LightMemSystem(MemorySystem):
                 # from dropped_turns, which never reached the model at all, and
                 # invisible before this: on 58bf7951 dropped_turns reported 6
                 # while 11 user turns were actually absent from the store, so
-                # the counter looked like the whole story and was not (see
-                # our development notes). Zero is the expected value
+                # the counter looked like the whole story and was not.
+                # Zero is the expected value
                 # only for a sample whose every turn held something.
                 #
                 # Measured over addressable_turn_ids, NOT ingested_turn_ids. The
@@ -857,7 +857,7 @@ class LightMemSystem(MemorySystem):
                 # one of them, so an assistant turn under `user_only` could
                 # never carry a unit and counting it made this number ~99%
                 # structural: 125,485 over LongMemEval-S against 124,334
-                # assistant turns in the dataset. our development notes
+                # assistant turns in the dataset.
                 #
                 # Read off the SIDECAR, not payload["turn_id"]. Under the broken
                 # stamp a unit charged one turn to the side left its real source

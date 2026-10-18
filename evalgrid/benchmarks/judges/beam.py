@@ -29,8 +29,7 @@ not the judge, and two of them need sentence-transformers at judge time. The
 ``llm_judge_score`` implemented here is the one number every ability shares and
 the one ``report_results.py`` averages.
 
-THREE DELIBERATE DEPARTURES FROM ``main``. Both are recorded, with the evidence,
-in our development notes. This benchmark is a MEASURING INSTRUMENT
+THREE DELIBERATE DEPARTURES FROM ``main``, each described below. This benchmark is a MEASURING INSTRUMENT
 for this repo's experiment, not a table to reproduce, so where upstream's
 released code disagrees with upstream's own paper or its own prompt, this file
 follows the paper and the prompt.
@@ -45,9 +44,9 @@ follows the paper and the prompt.
    against a 2.7% temperature-0 noise floor, moving different abilities in
    opposite directions. The prompt below is 3e12035's, i.e. the author's own
    pre-regression text, restored rather than rewritten — plus the one added
-   line in (3).
+   line in (2).
 
-3. ONE LINE IS OURS, in the RESPONSIVENESS REQUIREMENT block. Restoring the
+2. ONE LINE IS OURS, in the RESPONSIVENESS REQUIREMENT block. Restoring the
    question alone INVERTS on abstention: its nuggets are absence statements
    ("Based on the provided chat, there is no information related to ..."), the
    prompt's own keyword rule classifies those as NEGATIVE CONSTRAINTS, and it
@@ -63,7 +62,7 @@ follows the paper and the prompt.
    and summarization, same-signed across all three corpora, and
    temporal_reasoning's -0.092 is the judge catching genuine arithmetic errors.
 
-4. ``event_ordering`` IS SCORED BY ``final_score``, NOT ``tau_norm``. The paper
+3. ``event_ordering`` IS SCORED BY ``final_score``, NOT ``tau_norm``. The paper
    says tau-b was chosen because it "considers both order and presence";
    ``event_ordering_score`` computes ``final_score = tau_norm * f1`` and
    ``report_results.py:43`` then publishes the bare ``tau_norm``, dropping the
@@ -266,7 +265,7 @@ def _answer_lines(hypothesis: str) -> list[str]:
 # len(lines) x len(nuggets) calls, measured at 1,185 for the 40 event_ordering
 # questions of one cell — 53% of the whole judge budget for 10% of the
 # benchmark — and it aligns BADLY, f1 0.301 against a 0.996 positional ceiling
-# on answers that are demonstrably right (oracle.md §9.3a).
+# on answers that are demonstrably right (measured on the oracle cells).
 #
 # It aligns badly for a structural reason, not a prompt one. The scan is greedy
 # and blind: each call sees one nugget and one line, so a line that vaguely

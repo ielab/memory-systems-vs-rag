@@ -11,7 +11,7 @@ Files:
 One parquet ROW is one CONVERSATION, and one conversation is one Sample
 carrying TWENTY queries — 2 for each of ten memory abilities. That is the shape
 every decision below follows from, and it is the shape LongMemEval does not
-have. See our development notes for the measured properties; this file
+have. ``evalgrid.tools.beam_stats`` measures these properties; this file
 only says what the harness has to do about them.
 
 Four things this adapter owns, because nothing downstream can recover them:
@@ -34,15 +34,15 @@ Four things this adapter owns, because nothing downstream can recover them:
    other.
 
 3. THE ``->->`` MARKER. 74.9% of user messages end with a trailing ``->-> i,j``
-   — the message's own ``index`` field, leaked by the generation pipeline
-   (beam.md §7). Stripped here so no system indexes an artefact.
+   — the message's own ``index`` field, leaked by the generation pipeline.
+   Stripped here so no system indexes an artefact.
 
 4. THE GOLD ANSWER, which has three different names and is often absent. See
    ``_gold_answer``.
 
 Not handled here, on purpose: the 500K/1M tiers exceed the ingest unit (every
 session at 1M is over a 32 K window). They load through this same adapter, but
-read beam.md §2 before running one.
+treat them as a length-stress study, not a comparison row.
 """
 
 from __future__ import annotations
@@ -59,7 +59,7 @@ from evalgrid.benchmarks.types import Session, Sample, Query, Turn
 #: "...meet my deadlines by then? ->-> 1,1". Same regex as
 #: evalgrid/tools/beam_stats.py, which is what measured its 74.9% incidence.
 #:
-#: WIDER THAN `[\d,]+`, which is what beam.md §7 quotes and what the first
+#: WIDER THAN `[\d,]+`, which is what the first
 #: version of this file used. Three variants leaked past that and survived into
 #: the corpus — measured by dumping the tier with evalgrid.tools.beam_to_jsonl
 #: and grepping, 8 user turns of the 100K tier's 2,866:
@@ -76,8 +76,8 @@ _MARKER = re.compile(r"\s*->->\s*(?:\d+|N/A)(?:\s*,\s*(?:\d+|N/A))*\s*\)?\s*$")
 #: depends on the ability: `answer` for five of them, `ideal_answer` for
 #: contradiction_resolution, `ideal_response` for abstention — and NONE of the
 #: three for instruction_following, preference_following and summarization.
-#: That is 120 of the 100K tier's 400 questions with no short gold answer
-#: (beam.md §5), so ``Query.answer`` is None there and a judge for this
+#: That is 120 of the 100K tier's 400 questions with no short gold answer,
+#: so ``Query.answer`` is None there and a judge for this
 #: benchmark MUST be able to score against the rubric instead.
 #:
 #: Those 120 are not goldless — besides the `rubric` every question carries,
@@ -88,7 +88,7 @@ _MARKER = re.compile(r"\s*->->\s*(?:\d+|N/A)(?:\s*,\s*(?:\d+|N/A))*\s*\)?\s*$")
 #: score can read either field, and leaving them out is what keeps
 #: ``Query.answer is None`` an honest marker of "graded behaviorally, not
 #: against a string". Adding them would also have to move the same count in
-#: tools/beam_stats.py::ANSWER_FIELDS, beam.md §5 and the six
+#: tools/beam_stats.py::ANSWER_FIELDS and the six
 #: experiments/*/beam_100k.yaml headers, which all quote the 120.
 _ANSWER_FIELDS = ("answer", "ideal_answer", "ideal_response")
 
@@ -134,8 +134,8 @@ def _literal(value: Any) -> Any:
     """Parse a Python-repr STRING, twice where the value is a repr of a repr.
 
     ``probing_questions`` is a repr string rather than JSON, and some rows store
-    it double-encoded, so one literal_eval returns a str instead of a dict
-    (beam.md §6). ``rubric`` is the same shape one level down. Anything that
+    it double-encoded, so one literal_eval returns a str instead of a dict.
+    ``rubric`` is the same shape one level down. Anything that
     does not parse comes back untouched — a malformed rubric is a question worth
     keeping without one, not a conversation worth losing.
     """
@@ -175,7 +175,7 @@ def _evidence_ids(item: dict) -> list[str]:
         summarization;
       * a dict of named lists — contradiction_resolution
         (first_statement/second_statement), knowledge_update and
-        temporal_reasoning. beam.md §4 names only the first of those three;
+        temporal_reasoning. BEAM documents only the first of those three;
         measured, all three are dicts;
       * absent entirely — every abstention question, by design (a question with
         no answer in the corpus has no evidence in it either), plus a handful of
@@ -189,7 +189,7 @@ def _evidence_ids(item: dict) -> list[str]:
     across ``100K_4_event_ordering_1`` (2), ``100K_13_event_ordering_1`` (5) and
     ``100K_18_event_ordering_1`` (7) — the last left with an EMPTY gold set, so
     it was un-scoreable in retrieval and answered from nothing under
-    ``--retriever oracle`` (measured in our development notes).
+    ``--retriever oracle``.
     ``_expand`` flattens them. That reads BEAM's own data; it does not change
     BEAM's protocol — the ids were always there, one level down.
 
@@ -279,14 +279,14 @@ class BEAMAdapter:
         """The conversation's 20 questions — 2 per ability, ability-ordered.
 
         ``question_type`` is the ability name, which is what the judge aggregates
-        per-category on and what beam.md's per-ability tables are keyed by.
+        per-category on and what per-ability tables are keyed by.
         There is no per-question date in BEAM, so ``question_date`` stays None
         and the answer prompts fall through to their undated branch.
 
         ``evidence_turn_ids`` is translated into canonical turn ids HERE rather
         than left in BEAM's message-id namespace, so the ids a query names and
         the ids a system records are the same strings. An id naming no message
-        is dropped — 0.6% of the 100K tier's, beam.md §4.
+        is dropped — 0.6% of the 100K tier's.
         """
         queries: list[Query] = []
         for ability, items in sorted(probing.items()):

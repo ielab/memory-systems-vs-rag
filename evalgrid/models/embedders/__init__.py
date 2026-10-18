@@ -6,7 +6,7 @@ def count_processed_tokens(model, texts: list[str]) -> int | None:
 
     ``attention_mask``, not the raw id count: sentence-transformers cuts every
     input at the model's ``max_seq_length`` (256 for MiniLM-L6-v2) and says
-    nothing about it — our development notes record that silent cut — so tokens FED IN
+    nothing about it, so tokens FED IN
     and tokens the model SAW differ by whatever was dropped. This reports what
     the model saw, which is the quantity a cost column is asking about.
 

@@ -36,8 +36,7 @@ that set is one session, which is precisely the granularity LongMemEval itself
 ships (``answer_session_ids``) — but it is coarser than LightMem's per-fact
 ``source_id`` or A-Mem's one-note-per-turn, so has_answer qrels are NOT
 comparable across those systems. Use the LLM labeler for cross-system retrieval
-numbers. See our development notes ("Batched extraction blurs
-provenance").
+numbers: batched extraction blurs provenance.
 
 ADAPTER: **a window whose extraction fails is silently dropped upstream.**
 ``_generate_memory_entries`` returns ``[]`` after three JSON-parse failures,
@@ -173,8 +172,8 @@ UPSTREAM_ENCODE_BATCH = 32
 #: NOT A CONFIG KEY, deliberately. ``embedder`` is fingerprinted into every
 #: store's ``config_sha256``, and a knob there would mark all six simplemem
 #: stores stale over a change that alters no saved byte — the vectors live in a
-#: per-process LanceDB that ``save_memory`` never writes. our development notes caveat
-#: cuts the other way for once: the fingerprint covers the config, not the code.
+#: per-process LanceDB that ``save_memory`` never writes. The usual
+#: caveat cuts the other way for once: the fingerprint covers the config, not the code.
 #:
 #: Override with EVALGRID_SIMPLEMEM_ATTN_BUDGET on a card with more room; 0 or
 #: less disables the cap entirely and restores upstream's unbounded default.
@@ -919,7 +918,7 @@ class SimpleMemBase(MemorySystem):
                 "truncated_calls": self._truncated_this_sample(),
                 # The other cause of an empty_window: a completion that came
                 # back whole but held no scrapeable JSON. Counted in the
-                # controller's extract_json (our development notes, "Failure policy" §4)
+                # controller's extract_json
                 # and surfaced here, because empty_windows alone cannot say
                 # whether a window held no facts or was simply unparseable.
                 "json_failures": self._since_reset("json_failures"),

@@ -64,8 +64,7 @@ WHAT IT WRITES
 
 ``lexical_unresolved`` is an entry attributed among the turns that could be
 scored while its window ALSO names turns the local dataset does not have (13
-LongMemEval-S stores were ingested from a copy with one extra session; see
-our development notes) — the turn it restates may be one of those.
+LongMemEval-S stores were ingested from a copy with one extra session) — the turn it restates may be one of those.
 
 ``method: "none"`` is an entry whose store record carries no provenance; it
 stays empty. Additive: no store field is written, the store's own
@@ -225,7 +224,7 @@ def main() -> int:
     samples = list(build_adapter(args.dataset).samples())
     # Every turn of the dataset, not only the sample's own: 13 LongMemEval-S
     # stores were ingested from a dataset copy with one extra session in the
-    # haystack (every memory system, not only this one; our development notes).
+    # haystack (every memory system, not only this one).
     # Where that session exists in another sample, resolving its ids lets an
     # entry be attributed to the turn it restates — where it can never be gold —
     # instead of being forced onto the nearest turn of this sample. Same id,

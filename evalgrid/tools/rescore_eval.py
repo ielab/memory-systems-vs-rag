@@ -232,8 +232,8 @@ def inspect(cell: str) -> dict:
     a = rep["args"]
     qrels_dir = a.get("qrels_dir")
     # THE CELL IS WHERE THE RANKINGS ARE. A manifest records paths as they were
-    # typed when eval last ran, and scripts/tools/rename_native_cells.sh moves a
-    # cell in all three trees WITHOUT rewriting them — so a renamed cell's
+    # typed when eval last ran, and renaming a cell directory moves it
+    # in all three trees WITHOUT rewriting them — so a renamed cell's
     # manifest names a directory that no longer exists. Trusting it made this
     # tool score `native/` while standing inside
     # `native-emb-<M>--naive/`: 0 queries scoreable, MISSING metrics (they were
@@ -253,7 +253,7 @@ def inspect(cell: str) -> dict:
         renamed_from = os.path.basename(recorded_dir.rstrip("/"))
         rep["renamed_from"] = recorded_dir
         rep["reasons"].append(f"manifest records --retrieval-dir {recorded_dir}, which is "
-                              f"not this cell — renamed since (rename_native_cells.sh "
+                              f"not this cell — renamed since (a rename "
                               f"moves the directory, not the record). Replaying against "
                               f"this cell, and rebasing --out onto its name.")
     # A null "out" is not a broken manifest — it is the record of an eval run

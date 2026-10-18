@@ -12,7 +12,7 @@ short of parsing it twice shows you the questions.
 
 THIS DOES NOT REPLACE THE PARQUET, and nothing in the pipeline reads what it
 writes. ``data/`` is gitignored and the parquet is not tracked, so the release
-stays byte-reproducible from ``hf download`` (dataset_analysis/beam.md §1);
+stays byte-reproducible from ``hf download``;
 a converted copy would quietly become a second source of truth that no longer
 matches upstream. The adapter reads the parquet directly in about a second.
 This is a reading tool.
@@ -72,7 +72,7 @@ _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__f
 #: Deliberately NOT ``data/BEAM/data/``, which is what
 #: ``hf download --local-dir data/BEAM`` populates and what its
 #: ``.cache/huggingface`` tracks. Keeping derived files out of that directory is
-#: what preserves the property beam.md §1 relies on: the release stays
+#: what preserves this property: the release stays
 #: byte-comparable with upstream and can be re-fetched without first working out
 #: which files are ours.
 #:

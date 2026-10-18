@@ -63,7 +63,7 @@ judge_model: gpt-4o-mini
 # format matches the retrieve --retriever* flags and --native-retriever alike:
 # bm25 | sparse:MODEL | dense:MODEL[@http://host/v1] | rrf:MODEL[@url] (BM25 +
 # dense fused by reciprocal rank fusion). The @localhost entries need a vllm
-# embedding server on the matching port (:8001, :8002 — see README "vllm");
+# embedding server on the matching port (:8001, :8002 — see "Where they run" in the README);
 # bm25, SPLADE-v3 and MiniLM load in-process.
 #
 # `retrievers:` ranks corpus.jsonl with no system loaded — the CONTROL.
@@ -149,7 +149,7 @@ native_retrievers:
 # budget), with tokens the binding one for HyperMem.
 #
 # READ THIS BEFORE REPORTING A top95 ROW. With the cross-encoder off
-# (`reranker.enabled: false`, our development notes), `initial_candidates` is
+# (`reranker.enabled: false`), `initial_candidates` is
 # not read at all and each layer ranks its whole doc set — so at fact_top_k 95
 # the funnel keeps 95 facts and has almost nothing left to filter: this
 # condition is close to raw rrf over the fact level, which is NOT what

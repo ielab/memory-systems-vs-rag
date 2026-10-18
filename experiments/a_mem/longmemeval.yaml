@@ -3,7 +3,7 @@
 # Scored against the per-note has_answer flag rather than an LLM labeler: a note
 # is relevant iff it was constructed from a turn LongMemEval-S marks has_answer.
 # A-Mem builds one note per turn — BOTH speakers, per the repo-wide `roles: all`
-# (README "Speakers: both"), not user turns only as this line used to say. So
+# (see the README Notes), not user turns only as this line used to say. So
 # the mapping is exact, which is the point: there is no extraction step to lose
 # provenance through, which is not true of LightMem. Verified on
 # outputs/_smoke4: 2,180 notes against the same 2,180 turns, and the 5 notes
@@ -56,7 +56,7 @@ judge_model: gpt-4o-mini
 # format matches the retrieve --retriever* flags and --native-retriever alike:
 # bm25 | sparse:MODEL | dense:MODEL[@http://host/v1] | rrf:MODEL[@url] (BM25 +
 # dense fused by reciprocal rank fusion). The @localhost entries need a vllm
-# embedding server on the matching port (:8001, :8002 — see README "vllm");
+# embedding server on the matching port (:8001, :8002 — see "Where they run" in the README);
 # bm25, SPLADE-v3 and MiniLM load in-process.
 #
 # `retrievers:` ranks corpus.jsonl with no system loaded — the CONTROL.

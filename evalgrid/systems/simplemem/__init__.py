@@ -12,6 +12,5 @@ Only ``simplemem.core.*`` and ``simplemem.text.system`` are used. The vendored
 ``multimodal/``, ``evolver/`` and ``integrations/`` trees are separate products
 (Omni-SimpleMem, EvolveMem, the MCP server) and are never imported — in
 particular ``evolver/benchmarks/longmemeval.py``, whose answer prompt is
-conditioned on LongMemEval's gold ``question_type`` field. See
-our development notes
+conditioned on LongMemEval's gold ``question_type`` field.
 """

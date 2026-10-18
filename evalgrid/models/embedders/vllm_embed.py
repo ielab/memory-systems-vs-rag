@@ -268,7 +268,7 @@ class VLLMEmbedder(EmbedderModel):
                 # is re-shaped to what the server just said it accepts and sent
                 # ONCE more.
                 #
-                # On the no-retry rule (our development notes, failure policy rule 1):
+                # On the repo's no-retry rule:
                 # that rule exists to stop upstream's `while True` loops
                 # resending an identical prompt that cannot ever fit. This is
                 # the opposite — one send of a DIFFERENT, corrected request,

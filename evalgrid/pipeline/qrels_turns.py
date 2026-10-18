@@ -137,7 +137,7 @@ def _pair_units(session, stamp):
     An unmatched turn becomes a one-sided document rather than being dropped.
     That is memorybank's and lightmem/locomo's behaviour, and deliberately NOT
     lightmem's LongMemEval driver, whose stride-2 loop silently discards 51 user
-    + 19 assistant turns (our development notes). A baseline corpus that drops
+    + 19 assistant turns. A baseline corpus that drops
     turns is not comparable to all_turns, and losing evidence turns to a
     formatting rule would be a measurement error, not an alignment.
 

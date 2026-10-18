@@ -73,8 +73,7 @@ class Mem0Plugin(SystemPlugin):
 
         (Mem0^g would not flatten this way: its unit is a graph edge, which is
         not an independently retrievable document without verbalisation. That is
-        one of the reasons the graph variant is out of scope — see
-        our development notes)
+        one of the reasons the graph variant is out of scope.)
         """
         path = os.path.join(sample_mem_dir, "points.jsonl")
         if not os.path.isfile(path):

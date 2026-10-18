@@ -201,8 +201,8 @@ FROM_RETRIEVAL=${FROM_RETRIEVAL:-}
 #   * NO MEMORY SYSTEM IS LOADED, so no store and no memory LLM are touched;
 #     the job needs the generator alone.
 #   * it writes answer_stats.jsonl and answer_summary.json (the native replay
-#     writes neither — our development notes item 1), so every budget/truncation
-#     field our development notes say to report is on disk without re-parsing
+#     writes neither), so every budget/truncation
+#     field worth reporting is on disk without re-parsing
 #     traces.jsonl.
 #
 # On disk the two never collide: the path segment carries "--native-prompt" for
@@ -766,7 +766,7 @@ fi
 # attached to the NATIVE parser group, because a trace is a record of a system's
 # own loop and this path runs none — it re-ranks a corpus by a saved run.tsv.
 # What it writes instead is answer_stats.jsonl / answer_summary.json, which is
-# the per-question budget and truncation record our development notes asks for. The
+# the per-question budget and truncation record. The
 # retrieval trajectory is not lost either: it was recorded once, by the retrieve
 # stage, in the retrieval.jsonl this run replays.
 if [[ "$MODE" == "native" && "$PROMPT" == "shared" && "$STAGE" == "answer" ]]; then
@@ -799,8 +799,8 @@ echo "==================================================================="
 # memory-system answer and a full-context answer are generated under identical
 # serving conditions and --context-window means the same number in both. It also
 # costs nothing to be generous: a top20 or budget1000 prompt is ~1k tokens, so
-# the window here is a guard that should never fire, exactly as our development notes
-# §4e describes it. One server start for the whole job instead of two.
+# the window here is a guard that should never fire.
+# One server start for the whole job instead of two.
 declare -a SPECS=() CTXS=()
 ANSWER_CTX=""
 [[ "$PROMPT" == "shared" && "$MODE" == "native" && "$STAGE" == "answer" ]] && \

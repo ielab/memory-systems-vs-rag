@@ -62,7 +62,7 @@ from evalgrid.benchmarks.retrievers.dense import DenseRetriever
 from evalgrid.models.base import EmbedderModel
 
 #: Upstream's RRF_K, and the value the original RRF paper recommends. Held fixed
-#: across the grid (our development notes) — it is a constant of the
+#: across the grid — it is a constant of the
 #: combiner, not a knob this experiment sweeps.
 RRF_K = 60
 

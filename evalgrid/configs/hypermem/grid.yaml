@@ -50,7 +50,7 @@
 # this file's defaults a native run needs ONE other served model at query time,
 # the embedder (:11810), for the dense leg of `retrieval_type: rrf`. The
 # cross-encoder reranker (:12810) is OFF here and everywhere else in this repo
-# (see the rerank block at the bottom, and our development notes), so an
+# (see the rerank block at the bottom), so an
 # end-to-end native run is two servers plus the generator, not three.
 #
 # ---------------------------------------------------------------------------
@@ -65,8 +65,8 @@
 #
 # On LongMemEval-S (E≈50, and haystack sessions are mostly unrelated distractors
 # so T≈E) that is a few hundred LLM calls per sample — hundreds of thousands
-# across the benchmark. our development notes call cost, not
-# correctness, the blocker for this system, and the numbers above are why. Shard
+# across the benchmark. Cost, not correctness, is the blocker for this
+# system, and the numbers above are why. Shard
 # ingest (--num-shards) and watch outputs/_memory/.../ingest_usage.json.
 # ---------------------------------------------------------------------------
 

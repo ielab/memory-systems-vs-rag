@@ -106,8 +106,8 @@ sys.path.insert(0, str(REPO))
 
 from evalgrid.lib.paths import model_slug  # noqa: E402
 # The tree layout, the spec reader and the state vocabulary are check_grid's;
-# imported rather than restated so a layout change lands in one file. See
-# our development notes for what a second copy of one of these costs.
+# imported rather than restated so a layout change lands in one file; a
+# second copy would drift out of date.
 from evalgrid.tools.check_grid import Tree, load_spec  # noqa: E402
 
 #: run_all_judge.sh's fallback when a spec names no judge_model. The project

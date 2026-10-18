@@ -36,7 +36,7 @@ bypasses upstream's ``EmbeddingProvider``, and one more:
   1. It retries twice over — ``Retry(total=10)`` mounted on the session AND a
      10-attempt exponential-backoff loop around the POST — which compounds to
      ~100 sends of a request that failed, against a repo-wide rule of one
-     (our development notes §"no-retry"). The backoff alone sleeps 2^0..2^9 ≈ 17 minutes.
+     (no retries). The backoff alone sleeps 2^0..2^9 ≈ 17 minutes.
   2. It POSTs every candidate in one request body. At ``initial_candidates: 100``
      with full episode descriptions that is a large single POST, three times per
      question, with no way to bound it.

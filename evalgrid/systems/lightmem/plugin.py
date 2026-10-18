@@ -180,8 +180,7 @@ class LightMemPlugin(SystemPlugin):
         the neighbouring ASSISTANT turn — which is why ~26% of saved units carry
         an assistant turn id under ``messages_use: user_only``, a combination
         that should be impossible. ``has_answer`` reads the same broken index and
-        is wrong in the same places, so neither field can check the other. See
-        our development notes
+        is wrong in the same places, so neither field can check the other.
 
         Since 2026-09-02 the sidecar is written by the INGEST itself:
         ``LightMemSystem`` recomputes the label the extraction prompt printed and

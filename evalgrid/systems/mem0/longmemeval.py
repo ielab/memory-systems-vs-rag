@@ -18,8 +18,7 @@ library this package wraps:
 So this row does not reproduce a published number, and should not be presented
 as one. What it produces is Mem0 under this repo's protocol: same corpus
 universe, same qrels, same retrievers, same prompt, same judge as every other
-system — which is the only internally consistent comparison available (see
-our development notes).
+system — which is the only internally consistent comparison available.
 
 Ingest follows upstream's harness on both axes that matter:
 

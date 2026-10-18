@@ -46,8 +46,7 @@ MEM_BASE_URL=${MEM_BASE_URL:-http://localhost:${VLLM_PORT}/v1}
 # of the six upstream extractors retry a 400 in an unbounded `while True:`, and
 # the stage burns its whole timeout before giving up and dropping that unit's
 # memory. HyperMem lost one topic's entire fact set that way (six of a sample's
-# 53 sessions ended with no facts) after 331 rejected requests — see
-# our development notes
+# 53 sessions ended with no facts) after 331 rejected requests.
 #
 # So the long-context group gets a window big enough that a rejection is a real
 # bug rather than an arithmetic certainty, and the two systems that chunk their
@@ -164,7 +163,7 @@ NUM_SHARDS=${NUM_SHARDS:-1}
 SHARD_ID=${SHARD_ID:-0}
 # Trajectories are on by default at the level that keeps prompts verbatim, for
 # every sample: a run you cannot read back is a run you have to repeat, and every
-# bug in bugs.md was found in a `full` trajectory. The cost is disk, not GPU —
+# bug fixed in this project was found in a `full` trajectory. The cost is disk, not GPU —
 # roughly 4 bytes per recorded token, so a full LongMemEval-S ingest of all six
 # systems is ~10 GB. TRACE_LEVEL=off restores the NULL_RECORDER path.
 TRACE_LEVEL=${TRACE_LEVEL:-full}
@@ -376,7 +375,7 @@ start_server() {
             | sed 's/^.*INFO.*\] /!!!   weights DID load: /' >&2
         else
           echo "!!!   weights never finished loading — check the model is staged" \
-               "(MODEL=$MEM_MODEL bash scripts/tools/check_env.sh)." >&2
+               "and its weights are complete." >&2
         fi
       fi
       VLLM_PID=""
@@ -438,8 +437,8 @@ EMB_PID=""
 
 # --- cross-encoder reranker (HyperMem, published setting) -------------------
 # A SECOND side server, needed only by HyperMem with `reranker.enabled: true`
-# (evalgrid/configs/hypermem/naive_query.yaml). Off everywhere else — see
-# our development notes for why no other row in this project has a second stage.
+# (evalgrid/configs/hypermem/naive_query.yaml). Off everywhere else, so no other row
+# in this project has a second stage.
 #
 # Qwen3-Reranker-4B is a GENERATIVE model scored through /v1/completions with a
 # one-token yes/no template (evalgrid/systems/hypermem/reranker.py), not an

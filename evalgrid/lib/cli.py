@@ -224,8 +224,8 @@ def add_overwrite_arg(parser: argparse.ArgumentParser, help: str | None = None) 
 def add_trace_args(parser: argparse.ArgumentParser) -> None:
     """Trajectory recording (evalgrid/lib/trace.py). ``full``, every sample, by default.
 
-    A run you cannot read back is a run you have to repeat, and every bug in
-    our development notes was found in a ``full`` trajectory. §29 is the sharpest case:
+    A run you cannot read back is a run you have to repeat, and every bug fixed in
+    this project was found in a ``full`` trajectory. The sharpest case:
     LightMem's turn provenance was rebuilt from the trajectory alone
     (evalgrid.tools.lightmem_rebuild_provenance), so a store ingested without one
     could only have been repaired by re-ingesting it. The cost is disk, not GPU —
@@ -233,7 +233,7 @@ def add_trace_args(parser: argparse.ArgumentParser) -> None:
     all six systems.
 
     ``full`` and not ``steps``: the levels below it truncate payloads to
-    ``--trace-max-chars``, and the §29 rebuild joins facts on VERBATIM text, so a
+    ``--trace-max-chars``, and the LightMem provenance rebuild joins facts on VERBATIM text, so a
     truncated trajectory would read as present and repair nothing.
 
     ``--trace-level off`` restores the NULL_RECORDER, which is not "a recorder
@@ -248,7 +248,7 @@ def add_trace_args(parser: argparse.ArgumentParser) -> None:
                         help="Record what the system's pipeline did, step by step: "
                              "'off' (nothing), 'calls' (one record per LLM call), "
                              "'steps' (+ named pipeline stages), 'full' (default; steps with "
-                             "untruncated payloads — large, and the only level the §29 provenance "
+                             "untruncated payloads — large, and the only level the LightMem provenance "
                              "rebuild can read). Each level writes its OWN trajectory-<level>.jsonl, so "
                              "two levels never overwrite or interleave; read one with "
                              "python -m evalgrid.tools.inspect_trajectory.")

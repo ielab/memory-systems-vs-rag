@@ -83,7 +83,7 @@ def parse_session_timestamp(raw: Optional[str]) -> datetime:
     "March 14, 2024 (Thursday) at 3:00 PM UTC" and fact extraction gets a
     reference time for relative->absolute conversion — so a session silently
     stamped with today's date corrupts every temporal question in the sample and
-    does it invisibly. See our development notes ("Timestamps").
+    does it invisibly.
     """
     if not raw:
         raise ValueError(
@@ -419,9 +419,8 @@ class HyperMemBase(MemorySystem):
             episode hyperedge 1 per topic touched, per episode
             fact extraction   2 per topic
         On LongMemEval-S (E≈50, and haystack sessions are mostly unrelated
-        distractors so T≈E) that is a few hundred calls per sample. It is the
-        reason our development notes call cost, not correctness, the
-        blocker for this system.
+        distractors so T≈E) that is a few hundred calls per sample, which is why
+        cost, not correctness, is the blocker for this system.
         """
         if not self.episodes:
             raise RuntimeError(

@@ -82,7 +82,7 @@ class OpenAICompatLLMClient:
             tokens per attempt rather than the configured cap. Prefer a cap that
             clears the largest legitimate completion; see
             evalgrid/configs/simplemem/default.yaml for the sizing and
-            our development notes for what makes the replies run away.
+            for what makes the replies run away.
         json_mode: "auto" (send response_format when a caller asks for it, fall
             back on rejection), "on" (a rejection is an error), or "off" (never
             send it, whatever ``USE_JSON_FORMAT`` says).

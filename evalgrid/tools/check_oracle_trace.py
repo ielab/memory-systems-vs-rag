@@ -21,8 +21,7 @@ That is not hypothetical. Two ways it has already happened:
     ``provenance.jsonl`` sidecar that was later deleted from all 20 sample dirs.
     The corpus was untouched, so ``check_corpus_matches`` passed; only the
     per-unit turn attribution moved, on 33 of 400 questions. The store could no
-    longer regenerate its own gold, and nothing said so for three weeks. See
-    our development notes
+    longer regenerate its own gold, and nothing said so for three weeks.
   * **a gold level was redefined.** ``relabel_union`` moved from a ``strict``
     base to a ``turn`` base on 2026-09-19; the qrels were rebuilt two hours
     after the answers were generated, so every ``relabel_union`` oracle cell
@@ -30,7 +29,7 @@ That is not hypothetical. Two ways it has already happened:
 
 Both are invisible to the existing checks. ``check_qrels`` counts gold rows but
 never recomputes them; ``check_answers`` checks that questions were ANSWERED,
-not what they were answered FROM. This closes the gap our development notes flag as
+not what they were answered FROM. This closes a gap that was
 still open: *nothing in the pipeline asserts that a store's provenance is the
 provenance its qrels were built from.*
 

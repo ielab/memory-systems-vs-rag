@@ -63,7 +63,7 @@ judge_model: gpt-4o-mini
 # format matches the retrieve --retriever* flags and --native-retriever alike:
 # bm25 | sparse:MODEL | dense:MODEL[@http://host/v1] | rrf:MODEL[@url] (BM25 +
 # dense fused by reciprocal rank fusion). The @localhost entries need a vllm
-# embedding server on the matching port (:8001, :8002 — see README "vllm");
+# embedding server on the matching port (:8001, :8002 — see "Where they run" in the README);
 # bm25, SPLADE-v3 and MiniLM load in-process.
 #
 # `retrievers:` ranks corpus.jsonl with no system loaded — the CONTROL.

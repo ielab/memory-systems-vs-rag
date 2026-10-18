@@ -85,8 +85,8 @@ def parse_retriever_spec(spec: str) -> tuple[str, str | None]:
     They used to be listed — ``("dense", "fusion")`` — which was a subset of the
     six paths.py already knew, so this tool raised ``unknown retriever spec`` on
     a spec the pipeline runs perfectly well: ``sparse:naver/splade-v3`` and all
-    three ``rrf:`` entries, i.e. half of simplemem's grid was uncheckable. Same
-    failure as our development notes — a parallel list that fell behind the real one —
+    three ``rrf:`` entries, i.e. half of simplemem's grid was uncheckable. A
+    parallel list had fallen behind the real one,
     so the list is gone rather than corrected.
     """
     if spec in ("bm25", "oracle"):

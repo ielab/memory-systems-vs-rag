@@ -92,7 +92,7 @@ def parse_retriever_spec(spec: str) -> tuple[str, str | None]:
     omitted ``rrf``, so this tool raised ``unknown retriever spec`` on the three
     ``rrf:`` rows every system's grid runs. Its sibling in check_retrieval.py
     carried a DIFFERENT subset of the same set, which is the tell: three copies
-    of one list, none of them right. Same failure as our development notes, so the
+    of one list, none of them right. A parallel list falls behind the real one, so the
     list is gone rather than corrected.
     """
     if spec in ("bm25", "oracle"):

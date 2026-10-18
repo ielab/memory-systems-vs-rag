@@ -6,8 +6,8 @@ Summarise what an ingest actually built, in the terms stage 2-3 are chosen in.
 
 ``check_ingest`` answers "did the run finish" — every sample complete, no
 unresolved failure, no degradation counter. This answers the next question,
-which is what the store is *made of*:
-our development notes table, over the real 500-sample ingest
+which is what the store is *made of*,
+measured over the real 500-sample ingest
 instead of the two smoke samples it was first measured on.
 
 What it measures, and why each column is there
@@ -20,7 +20,7 @@ compared:
 
   * **tok/unit** — the exchange rate between the two matching axes. ``--top-k``
     buys units, ``--context-budget`` buys tokens, and this converts one to the
-    other. §0b measured a 43x spread across six systems, so equal k is very
+    other. We measured a 43x spread across six systems, so equal k is very
     much not equal evidence, which is the whole argument for matching on
     tokens.
   * **units/sample** — what depth is even reachable. A system whose store holds
@@ -34,7 +34,7 @@ stage does — not on the system's internal object. Pass ``--raw-text`` to count
 which is per-unit and so is paid most by the finest-grained systems (for Mem0
 it more than doubles the unit: median 10 raw, 25 rendered).
 
-**``--raw-text`` is what reproduces §0b's table**, because that was measured
+**``--raw-text`` is what reproduces the unit-size table**, because that was measured
 over corpus.jsonl, and ``benchmarks.qrels`` writes clean text there with the
 stamp in metadata — the rendering happens later, in answer.py. Checked against
 the published numbers on the smoke stores: SimpleMem and LightMem match on
@@ -156,7 +156,7 @@ def resolve_targets(ap: argparse.ArgumentParser, args) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 def _dist(vals: list[int]) -> dict | None:
-    """The columns §0b's table reports: median / mean / p90 / max, plus n.
+    """The columns the unit-size table reports: median / mean / p90 / max, plus n.
 
     p90 rather than dataset_stats' p95: the interesting tail here is the
     occasional long unit that alone overflows a small budget, and p90 is where
@@ -268,7 +268,7 @@ def _row(cells: list[str], widths: list[int]) -> str:
 
 
 def print_units_table(results: list[dict]) -> None:
-    """§0b's shape: what one unit is, and how big it is."""
+    """The unit-size table: what one unit is, and how big it is."""
     header = ["system", "samples", "units/smp", "tok/unit", "mean", "p90", "max", "tok/smp"]
     rows = [header]
     for r in results:
@@ -293,7 +293,7 @@ def print_exchange_table(results: list[dict], topk: tuple[int, ...],
                          budgets: tuple[int, ...]) -> None:
     """What --top-k buys, and what a token budget buys back.
 
-    The point §0b makes and this makes concrete: at one k, two systems put very
+    The point this makes concrete: at one k, two systems put very
     different amounts of evidence in the prompt, so a table indexed by k is not
     a matched comparison.
     """

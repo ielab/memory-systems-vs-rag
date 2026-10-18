@@ -6,8 +6,7 @@ Compute corpus statistics for a LongMemEval JSON release (haystack size, turn
 and session distributions, token counts, ``has_answer`` evidence density, gold
 annotation coverage) and print them as JSON.
 
-This is the reproducer for our development notes — every number in that document
-comes from this script.
+Every LongMemEval statistic quoted in this repo comes from this script.
 
 Usage
 -----
@@ -114,7 +113,7 @@ def analyse(path, name, encoding="cl100k_base", threads=8):
     out["needle_density_pct"] = round(100 * sum(ev_tokens) / sum(counts), 3)
 
     # Gold-annotation coverage: does every declared answer session actually
-    # contain a has_answer turn? (See our development notes — it often does not.)
+    # contain a has_answer turn? (It often does not.)
     empty_gold, partial_gold = [], []
     for i, x in enumerate(data):
         flagged = {sid for sid, sess in zip(x["haystack_session_ids"], x["haystack_sessions"])
@@ -204,7 +203,7 @@ def main():
         targets = [(p, k) for k, p in DATASETS.items()
                    if k.startswith("longmemeval") and os.path.isfile(p)]
         if not targets:
-            sys.exit("No LongMemEval file found on disk — see README §2.")
+            sys.exit("No LongMemEval file found on disk — see the Data section of the README.")
 
     results = [analyse(p, name, args.encoding) for p, name in targets]
     if args.summary:

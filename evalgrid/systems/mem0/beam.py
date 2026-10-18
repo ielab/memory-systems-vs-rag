@@ -8,8 +8,8 @@ alternation means every pair is well-formed — no one-sided exchange to fold
 into an ADD/UPDATE decision.
 
 BEAM reuses this system's LongMemEval ingest policy, and that is a MEASURED
-choice rather than a fallthrough. On the 100K tier (evalgrid.tools.beam_stats,
-our development notes), across all 90 sessions:
+choice rather than a fallthrough. On the 100K tier (measured by
+evalgrid.tools.beam_stats), across all 90 sessions:
 
   * every session has an EVEN message count -> a stride-2 pairing loop drops
     nothing, where on LongMemEval-S it discards 2,020 turns;
@@ -29,7 +29,7 @@ WHAT IS NOT SOLVED BY BEING A SUBCLASS: session SIZE. A BEAM-100K session is a
 median ~25 K tokens against LongMemEval's ~1 K, and 25 of the 90 exceed the
 32,768-token window ``lightmem`` and ``simplemem`` are configured at. That is a
 config question (evalgrid/configs/), not an ingest-policy one, and it is why
-beam.md §2 calls 500K/1M a length-stress study rather than a comparison row.
+500K/1M are treated as a length-stress study rather than a comparison row.
 """
 
 from __future__ import annotations

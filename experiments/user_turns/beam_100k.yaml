@@ -1,5 +1,5 @@
 # ==========================================================================
-# Raw turns, USER only, on BEAM-100K — THE BASELINE TO BEAT (beam.md §3)
+# Raw turns, USER only, on BEAM-100K — THE BASELINE TO BEAT
 # ==========================================================================
 #
 # BEAM-100K is the folder BEAM's paper calls the 128K tier (it measures ~120 K).
@@ -13,7 +13,7 @@
 #    abilities take 100% of theirs there. A user-only filter therefore discards
 #    91.9% of the corpus for a 23% evidence loss — no memory construction
 #    required. On BEAM `user_turns` is not an ablation, it is the baseline a
-#    memory system has to beat (beam.md §3).
+#    memory system has to beat.
 #
 # 2. THE SCORE IS NOT AN ACCURACY. BEAM grades against a per-question `rubric`
 #    — a third of its questions ship no gold answer string at all — so the judge
@@ -27,8 +27,7 @@
 # 3. GOLD IS PER QUESTION. One conversation carries 20 questions with disjoint
 #    evidence (median 2 turns each; their union is 45). Retrieval is scored at
 #    turn granularity, which BEAM uniquely supports — do NOT read its
-#    session-level recall, since a conversation has only 3-5 sessions
-#    (beam.md §2, §4).
+#    session-level recall, since a conversation has only 3-5 sessions.
 #
 # 4. Not a memory system: no construction stage, no plugin. The corpus is
 #    written by evalgrid.pipeline.qrels_turns, so mem_model is the literal

@@ -26,7 +26,7 @@ each is silent in a different way:
     memorybank's truncation is ``truncated_summaries`` and it writes no
     ``truncated_calls`` at all). These are the quiet ones: a store built
     entirely from clipped or unparseable replies raises nothing, writes its
-    usage.json, and looks exactly like a good one. our development notes say what each
+    usage.json, and looks exactly like a good one. The tables below say what each
     counter means and which are expected. A numeric counter this tool has no
     entry for is reported as UNCLASSIFIED rather than skipped — see
     ``DEGRADATION_KEYS``. The mirror of that is ``NOTE_KEYS``: a counter that
@@ -106,7 +106,7 @@ from evalgrid.lib.cli import (  # noqa: E402
 from evalgrid.lib.paths import ExperimentPaths  # noqa: E402
 from evalgrid.lib.trace import TRAJECTORY_FILENAMES  # noqa: E402
 
-#: Per-store degradation counters, from our development notes table. Any of these
+#: Per-store degradation counters. Any of these
 #: being nonzero means the store is incomplete even though the run exited 0:
 #: truncated_calls / failed_calls are shared, the rest are per system (a_mem,
 #: simplemem, mem0, hypermem, lightmem, memorybank in that order).
@@ -156,7 +156,7 @@ NON_DEGRADATION_KEYS = ("no_op_adds",)
 #: turn: an assistant turn costs the store nothing by being dropped, because a
 #: kept one would have carried no unit either. Gating on it failed all 500
 #: lightmem stores of the LongMemEval-S grid for a shape that is upstream's
-#: design (our development notes") and put `truncated_calls` — 16 stores, real
+#: design, and put `truncated_calls` — 16 stores, real
 #: lost content — behind a counter set on 485.
 #:
 #: Demoted, not deleted, and the caveat is why: the odd tail and a mis-aligned
@@ -249,7 +249,7 @@ CALL_ERROR_CLASSES = (
 #: said something specific.
 CALL_ERROR_TYPES = {
     # hypermem wraps every extractor call in asyncio.wait_for against upstream's
-    # five unbounded `while True:` retry loops (our development notes). A hit
+    # five unbounded `while True:` retry loops. A hit
     # here is that guard firing, NOT the endpoint failing: the call was killed
     # from outside because the model would not satisfy a validator. It is also
     # why no counter moves — CancelledError is a BaseException, which is the

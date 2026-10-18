@@ -18,7 +18,7 @@ The axes that vary per system, and where each is answered:
   native retrieval  SystemPlugin.native_unit_ids — trace -> ranked unit ids
 
 ``iter_units`` is the load-bearing one. It is the executable form of the
-question every page in our development notes asks — *can this system's memory be
+question this whole project asks — *can this system's memory be
 flattened into self-contained, independently-retrievable text units with stable
 ids?* — because that is what lets us swap a system's native retriever for
 BM25 / dense / SPLADE and study memory as an IR problem. A system that cannot

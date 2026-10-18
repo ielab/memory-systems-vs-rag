@@ -76,7 +76,7 @@ class LightMemLongMemEval(LightMemSystem):
                     ])
             # Turns no pair reached: the leading non-user run skipped above, the
             # odd tail, and the mis-aligned pairs the role check rejects. All
-            # three are upstream's behaviour (our development notes"), so they are
+            # three are upstream's behaviour, so they are
             # counted rather than fixed — but counted they must be, because a
             # dropped turn is otherwise indistinguishable from a turn that
             # produced no memory. Over LongMemEval-S it is 2,020 turns, 3 of

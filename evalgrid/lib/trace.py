@@ -3,7 +3,7 @@ evalgrid/lib/trace.py
 ---------------------
 Trajectory recording: what each system's pipeline actually did, step by step.
 
-The design is in our development notes §18-§23. The short version:
+The design, in short:
 
 **Two layers.** L1 is a *call log*: every system's memory LLM already passes
 through an adapter class this repo owns (a_mem's OpenAICompatController,

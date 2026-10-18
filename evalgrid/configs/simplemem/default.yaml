@@ -35,9 +35,9 @@ memory_llm:
   # extraction calls stopped at exactly 32768 total tokens, mid-JSON-string.
   # One recovered on retry; the other was re-sent twice more and came back
   # byte-identical each time (in=6002, out=26766, ~197s a call), so that window
-  # cost ~80k output tokens and ~10 minutes before being dropped. See
-  # our development notes for why the replies run away in the first place — it is a
-  # repetition loop, upstream's prompt against this model, and NOT fixed here.
+  # cost ~80k output tokens and ~10 minutes before being dropped. The
+  # replies run away because of a repetition loop (upstream's prompt against
+  # this model), which is NOT fixed here.
   #
   # 16000 does not fix the drop. It bounds the blast radius: the largest
   # non-runaway completion in that run was 11,868 tokens, so this clears every
@@ -104,7 +104,7 @@ embedder:
 # the code's defaults, which an earlier version of this comment did.
 #
 # WHAT DROPPING `session` COSTS, stated plainly, because it was the default and
-# our development notes call it the main quality knob: a 20-turn
+# it is the main quality knob: a 20-turn
 # window covers roughly two LongMemEval-S sessions, so an extraction call mixes
 # unrelated conversations, and provenance here is window-level — every entry
 # inherits has_answer from its whole window, now smeared across those sessions.
@@ -127,8 +127,7 @@ window_size: 20
 #                     calls (every turn is extracted ~4 times).
 #
 # Taking the parenthetical because the released code was never the paper's code
-# — there is nothing to check either reading against (our development notes
-# simplemem.md §2) — and because it keeps the call count within a factor of the
+# — there is nothing to check either reading against — and because it keeps the call count within a factor of the
 # code's own setting. _drain advances by max(1, window_size - overlap_size), so
 # overlap_size IS the overlap here.
 overlap_size: 5

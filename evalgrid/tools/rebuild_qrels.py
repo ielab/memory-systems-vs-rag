@@ -180,7 +180,7 @@ def preflight(systems: list[str], dataset: str, specs: dict[str, dict],
     Returns the list of blocking problems (empty means go). Saved memory that is
     merely incomplete is NOT blocking — simplemem's store legitimately covers
     353 of 500 samples because its ingest failed on the rest and recorded them
-    (our development notes, outputs/ingest_failures/) — so it is reported and built.
+    (see outputs/ingest_failures/) — so it is reported and built.
     """
     problems: list[str] = []
 

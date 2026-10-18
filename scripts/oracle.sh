@@ -29,7 +29,7 @@
 #   simplemem                 21      1,274 / 1,756
 #
 # 1 to 21 units and 59 to 1,644 tokens — a "unit" means something different in
-# each system, which is exactly the caveat our development notes states about
+# each system, which is the same caveat that applies to
 # cross-system recall. Read the oracle WITHIN a system, as its ceiling; a
 # cross-system oracle column is comparing different amounts of evidence.
 #

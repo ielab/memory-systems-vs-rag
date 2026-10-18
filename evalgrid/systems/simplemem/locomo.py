@@ -4,8 +4,7 @@ evalgrid/systems/simplemem/locomo.py
 SimpleMem wrapper for LoCoMo — the benchmark it ships a driver for.
 
 Aligned with upstream's own harness (``test_locomo10.py``, which is not part of
-the installable package and so is not vendored here — see
-our development notes):
+the installable package and so is not vendored here):
   - both speakers, one ``Dialogue`` per turn, in session order
   - ``speaker`` is the LoCoMo speaker name; upstream renders each dialogue as
     ``"[<timestamp>] <speaker>: <text>"`` (``Dialogue.__str__``), which is what

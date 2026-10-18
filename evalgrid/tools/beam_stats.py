@@ -7,8 +7,7 @@ Compute corpus statistics and run the shortcut audit for the BEAM release in
 resolution and speaker location, needle density, probing-question schema
 variance, generation artefacts) and print them as JSON.
 
-This is the reproducer for our development notes — every number in that
-document comes from this script.
+Every BEAM statistic quoted in this repo's comments comes from this script.
 
 Usage
 -----
@@ -51,10 +50,10 @@ TIERS = ("100K", "500K", "1M")
 #: Trailing pipeline marker leaked into the released message text, e.g.
 #: "...meet my deadlines by then? ->-> 1,1" — the message's own `index` field.
 #:
-#: Kept identical to adapters/beam.py's `_MARKER`, and wider than the `[\d,]+`
-#: beam.md §7 quotes: "->-> 2,N/A", "->-> 5,14)" and "->-> 2,22, 24" also occur
+#: Kept identical to adapters/beam.py's `_MARKER`, and wider than a plain `[\d,]+`:
+#: "->-> 2,N/A", "->-> 5,14)" and "->-> 2,22, 24" also occur
 #: and are the same artefact. The percentages below therefore run very slightly
-#: HIGHER than the ones in that document, which were measured with the narrow
+#: HIGHER than ones measured with the narrow
 #: form — 8 user turns of 2,866 at the 100K tier.
 MARKER = re.compile(r"\s*->->\s*(?:\d+|N/A)(?:\s*,\s*(?:\d+|N/A))*\s*\)?\s*$")
 

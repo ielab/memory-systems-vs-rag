@@ -40,7 +40,7 @@ judge_model: gpt-4o-mini
 # sparse:MODEL | fusion:MODEL[@url] (BM25 + dense, 0.5/0.5 min-max score
 # fusion) | hybrid:MODEL (dual-representation model).
 # The @localhost dense entries each need a vllm embedding server already running
-# on the matching port (see README "vllm"); everything else loads in-process.
+# on the matching port (see "Where they run" in the README); everything else loads in-process.
 retrievers:
   # The paper's eight retrievers (RQ2).
   # --- sparse ---

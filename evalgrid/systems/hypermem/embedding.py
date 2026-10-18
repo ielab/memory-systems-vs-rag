@@ -27,7 +27,7 @@ top of the harness's own embedder (``evalgrid.models.factory.load_embedder``).
 Upstream's provider is bypassed rather than used, for three reasons:
 
   1. It retries connection failures five times with exponential backoff, which
-     contradicts this repo's no-retry rule (our development notes §"no-retry").
+     contradicts this repo's no-retry rule.
   2. It POSTs ``base_url`` verbatim while ``config.py`` defaults that to
      ``.../v1`` rather than ``.../v1/embeddings`` — a stock clone cannot reach
      its own server.
