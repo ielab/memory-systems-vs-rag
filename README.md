@@ -1,5 +1,8 @@
 # Memory Systems vs. RAG
 
+[![arXiv](https://img.shields.io/badge/arXiv-2610.24671-b31b1b.svg)](https://arxiv.org/abs/2610.24671)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 Code to reproduce the paper's experiments: six explicit memory systems (MemoryBank, A-Mem, Mem0,
 LightMem, SimpleMem, HyperMem) against raw-history RAG (*all-turns*, *user-turns*, *pair-turns*)
 on **LongMemEval-S** and **BEAM-100K**.
