@@ -13,7 +13,7 @@ variables.
 | `ingest_openai.sh` | builds memory with gpt-4o-mini through the OpenAI API | appendix |
 | `lib/vllm.sh` | shared helpers, sourced by the scripts above | — |
 
-The README's [Reproduce](../README.md#reproduce) section has the exact command for each step.
+The README's [Run the experiments](../README.md#4-run-the-experiments) section has the exact command for each step.
 
 ## Common options
 
